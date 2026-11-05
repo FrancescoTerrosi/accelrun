@@ -1,0 +1,21 @@
+# --- Build artifacts ---------------------------------------------------------
+/target/
+# local convenience copy of the release binary (extracted from the Docker image
+# or copied from target/release for quick `./accelrun` use)
+/accelrun
+
+# --- Python (tests) ----------------------------------------------------------
+tests/__pycache__/
+*.pyc
+
+# --- Host-specific toolchain config ------------------------------------------
+# .cargo/config.toml contains a linker workaround for this dev host (absolute
+# paths to a local rust-lld + glibc objects extracted to /tmp/fakelib — see
+# docs/decisions.md, "Foundational decisions"). Committing it would break
+# everyone else's builds; the workaround is documented there instead.
+/.cargo/
+
+# --- Local-only archive ------------------------------------------------------
+# Pre-promotion working files (e.g. the full original decisions log) —
+# deliberately unpublished.
+/archive/

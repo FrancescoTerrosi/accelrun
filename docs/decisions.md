@@ -1,0 +1,90 @@
+# Decisions log
+
+> **AI-assisted development, human-verified.** accelrun's code, scaffolding,
+> documentation, and artifacts were produced with LLM-based coding agents
+> under the author's direction. All design decisions, review, and hardware
+> verification are human work — including catching the bugs the generated
+> code carried (the five-bug chain below). Every entry is a verified record,
+> kept as the project's technical memory.
+
+## Foundational decisions
+
+- **Rust with zero external crates.** CLI parsing, JSON, a TOML subset, and
+  glob are hand-rolled: the release binary stays ≈460 KB and builds anywhere —
+  including rootless containers with no C toolchain (the first dev
+  environment had no system `cc`; the host-specific linker workaround stays
+  out of the repo, see `.gitignore`).
+- **Abstract the resource, never emulate CUDA.** Portability lives at the
+  workload's IR level (Triton / MLIR / SYCL / WebGPU / ONNX-RT); the launcher
+  only abstracts the *claim* (`ACCEL_*` contract).
+- **Direct injection by default, CDI opt-in.** Plain `--device` + `-e` works
+  on any Docker version; `--device cdi:accel.local/gpu=gpu0` (Docker ≥ 25) is
+  for fleet tooling that wants vendor-neutral specs.
+- **Toolkit-free attach.** Numbered `/dev/nvidia*` + control nodes, driver
+  libs bind-mounted read-only and mirrored into `/usr/lib/x86_64-linux-gnu`
+  for cross-distro loader paths, host `nvidia-smi` mounted in. `--gpus all`
+  is a last resort (WSL-like hosts) with a toolkit-presence check and a
+  clear remediation error.
+- **Selection policy.** Highest bandwidth among backends meeting the
+  budget; graceful degradation (a real GPU beats CPU even when short on
+  VRAM); `--unified` doubles the score of unified-memory backends.
+- **`--mem` is a hint, not a cap.** No hard VRAM capping without MIG —
+  `ACCEL_MEM_BYTES` is the app-level contract. Alpine/musl unsupported for
+  NVIDIA userspace (host driver binaries are glibc).
+- **Fault model.** FMEA-style registry: ProbeFalseNegative, UnifiedHostOOM,
+  VramOvercommit, BackendCrashMidRun, NumericDrift — with detection hooks
+  (`accelrun faults`).
+- **Scope.** Single-node launcher; the emitted CDI spec is the integration
+  surface for orchestrators (a k8s CRI plugin would break zero-dep and
+  re-enter nvidia-device-plugin territory).
+- **Docker build path** for hosts without Rust; release profile (`lto`,
+  `strip`, `codegen-units=1`) keeps the binary tiny; `Cargo.lock` committed
+  for reproducible builds.
+
+Bug-driven evolution before the first full pass: docker rejects JEDEC
+`--memory` suffixes (pass raw bytes); CPU fallback outranking GPU (prefer
+any real accelerator, rank by bandwidth first); missing toolkit producing
+cryptic docker errors (presence check + remediation); `run` keyword made
+optional; `--dry-run` added as the first debugging tool; `nvidia-smi`
+bind-mounted for non-CUDA images.
+
+## The five-bug chain — first end-to-end GPU pass
+
+The first complete pass on real hardware (Fedora host, RTX 5070 Ti 16 GB,
+driver 580 open kernel module, **no NVIDIA Container Toolkit**) surfaced a
+chain of five bugs, each masked by the one above it. It is kept in full as
+the canonical example of why the verification ladder exists: until the
+smoke test reached PASS once in its life, it was hiding its own bugs.
+
+1. **Glob class parser.** `[0-9]` was assumed two-char → never matched →
+   `glob_dev("/dev/nvidia[0-9]*")` always empty → only control nodes were
+   injected → in-container `nvidia-smi`: "No devices were found".
+2. **Cross-distro libpath.** Identity bind of `/usr/lib64` is invisible to
+   the Debian-family loader → `dlopen("libcuda.so.1")` failed. Fix: mirror
+   driver libs into `/usr/lib/x86_64-linux-gnu`.
+3. **Smoke-test context.** The CUDA context was created *after* the first
+   context-using call → CUresult 201. Never hit earlier because the script
+   always died at dlopen first.
+4. **False lead, retracted.** "Host CUDA broken / stale nvidia_uvm" — the
+   host was healthy: modules matched, dmesg clean, root behaved like user.
+5. **Legacy v1 symbols lie.** Unversioned `cuMemGetInfo` returns 201 on
+   driver 580 even on a healthy host and context; every real binding must
+   use `*_v2` (`cuMemGetInfo_v2`, `cuMemAlloc_v2`, `cuMemcpy*_v2`,
+   `cuMemFree_v2`).
+
+Lessons: (a) a smoke test must reach PASS once in its life, or it hides its
+own bugs; (b) bisect host-vs-container with the SAME snippet; (c) never call
+legacy unversioned CUDA memory entry points; (d) "it worked before" can mean
+a workload silently serving on CPU. All of it is distilled into the
+[runbook](runbook.md) failure map and verification ladder.
+
+## 2026 — promotion to standalone repository
+
+- accelrun started as the launcher for one of the author's own private
+  projects and is promoted to a standalone, public, dual-licensed
+  (MIT OR Apache-2.0) repository now that it is production-verified
+  end-to-end.
+- The session-by-session worklog was distilled into the sections above; the
+  full original stays in the author's local archive (gitignored).
+- Operator-facing knowledge lives in the [runbook](runbook.md); design
+  rationale in [vision.md](vision.md).

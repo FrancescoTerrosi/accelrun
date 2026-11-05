@@ -1,0 +1,6 @@
+target/
+.cargo/
+.git/
+docs/
+*.md
+specs/

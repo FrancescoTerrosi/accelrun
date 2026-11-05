@@ -1,0 +1,14 @@
+// Example probes.toml — drop in ~/.config/accelrun/probes.toml
+// Each entry registers a custom accelerator without recompiling accelrun.
+
+[[probe]]
+id = "tenstorrent"
+device_glob = "/dev/tenstorrent/*"
+mem_gib = 16
+unified = false
+
+[[probe]]
+id = "cxl-pool"
+device_glob = "/dev/cxl/*"
+mem_gib = 256
+unified = true

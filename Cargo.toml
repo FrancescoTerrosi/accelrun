@@ -1,0 +1,19 @@
+[package]
+name = "accelrun"
+version = "0.1.0"
+authors = ["Francesco Terrosi"]
+edition = "2021"
+description = "Portable accelerator resource abstraction for containers (CDI + cgroups + backend probing). Zero-dependency."
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+keywords = ["gpu", "containers", "docker", "cdi", "accelerator"]
+categories = ["command-line-utilities"]
+
+# Intentionally no dependencies: keeps the binary tiny and buildable anywhere,
+# including rootless/containers without a C toolchain.
+[dependencies]
+
+[profile.release]
+lto = true
+strip = true
+codegen-units = 1

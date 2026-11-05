@@ -1,0 +1,29 @@
+# Read by GitHub ("Cite this repository") and by Zenodo (release DOIs).
+cff-version: 1.2.0
+message: "If you use accelrun, please cite it using these metadata."
+title: accelrun
+version: 0.1.0
+# keep date-released in sync with the actual v0.1.0 tag date
+date-released: "2026-11-05"
+authors:
+  - family-names: Terrosi
+    given-names: Francesco
+type: software
+license:
+  - MIT
+  - Apache-2.0
+repository-code: "https://github.com/FrancescoTerrosi/accelrun"
+abstract: >-
+  Zero-dependency launcher that attaches host accelerators (NVIDIA, AMD,
+  Apple Metal, custom, CPU) to Docker containers as vendor-neutral
+  resources: raw device nodes + bind-mounted driver libraries, no NVIDIA
+  Container Toolkit, any Docker version. Workloads consume an abstract
+  accelerator resource via the ACCEL_* environment contract, with optional
+  vendor-neutral CDI publication.
+keywords:
+  - gpu
+  - containers
+  - docker
+  - cdi
+  - accelerator
+  - unified-memory
