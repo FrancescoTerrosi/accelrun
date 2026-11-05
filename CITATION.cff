@@ -9,9 +9,7 @@ authors:
   - family-names: Terrosi
     given-names: Francesco
 type: software
-license:
-  - MIT
-  - Apache-2.0
+license: "MIT OR Apache-2.0"
 repository-code: "https://github.com/FrancescoTerrosi/accelrun"
 abstract: >-
   Zero-dependency launcher that attaches host accelerators (NVIDIA, AMD,
