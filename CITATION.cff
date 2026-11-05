@@ -9,7 +9,13 @@ authors:
   - family-names: Terrosi
     given-names: Francesco
 type: software
-license: "MIT OR Apache-2.0"
+# Dual-licensed software (MIT OR Apache-2.0) — see LICENSE-MIT,
+# LICENSE-APACHE and Cargo.toml (`license = "MIT OR Apache-2.0"`). Zenodo's
+# importer requires a single SPDX identifier here: the spec-valid array
+# form [MIT, Apache-2.0] AND the expression string "MIT OR Apache-2.0"
+# both crash it (zenodo/zenodo#2515, open as of 2026-11). Keep exactly one
+# SPDX id and state the dual license in the Zenodo record description.
+license: MIT
 repository-code: "https://github.com/FrancescoTerrosi/accelrun"
 abstract: >-
   Zero-dependency launcher that attaches host accelerators (NVIDIA, AMD,

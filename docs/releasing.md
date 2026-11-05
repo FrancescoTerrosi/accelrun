@@ -93,6 +93,17 @@ Setup (one time):
 3. Flip the switch next to `accelrun` to **ON** (the repository must be
    public by this point — Zenodo only lists public repositories)
 
+One Zenodo quirk before the first tag: since Zenodo's InvenioRDM
+migration (late 2023), its metadata importer requires `license` in
+`CITATION.cff` to be a **single SPDX string** and crashes on the
+spec-valid array form (`license: [MIT, Apache-2.0]`) with
+`Citation metadata load failed` (zenodo/zenodo#2515, still open as of
+2026-11). The dual license is unaffected: the grant lives in
+`LICENSE-MIT`/`LICENSE-APACHE` and `Cargo.toml`'s SPDX expression, so the
+CFF carries `license: MIT` and the Zenodo record description must state
+"Dual-licensed under MIT OR Apache-2.0; both license texts are in the
+archive." Watch #2515 and restore the array if it is ever fixed.
+
 ### 3b. Tag the first release
 
 ```bash
@@ -101,7 +112,8 @@ git tag -a v0.1.0 -m "accelrun 0.1.0"
 git push origin v0.1.0
 ```
 
-Pushing the tag makes Zenodo archive the snapshot and mint the DOIs.
+Publishing the release for this tag is the trigger: Zenodo archives the
+snapshot and mints the DOIs on the release event, not on bare tag pushes.
 Record the concept DOI in the README citation section afterwards.
 
 ### 3c. GitHub Release with verified binaries
@@ -117,6 +129,11 @@ sha256sum accelrun-v0.1.0-x86_64 > SHA256SUMS
 
 GitHub → Releases → *Draft a new release* → choose tag `v0.1.0` → add release
 notes → attach **both** `accelrun-v0.1.0-x86_64` and `SHA256SUMS`.
+
+Publish **only after** the assets are attached: Zenodo snapshots the
+release at publish time — binaries added to an already-published release
+do not reach the archived record (the only re-trigger is delete +
+re-publish the release).
 
 ### 3d. New-user simulation (the last gate)
 
@@ -142,8 +159,7 @@ so `cargo login <token>` + `cargo publish` works as-is when the time comes.
   history starts at the second commit; the promotion is the first.
 - **Decision log**: append new entries to `docs/decisions.md` as decisions
   happen; it is the project's technical memory.
-- **Releases**: tag → Zenodo DOI → GitHub release with binaries + checksums;
-  keep `CITATION.cff` `date-released` in sync with tag dates.
+- **Releases**: single-`license` CFF check → tag → GitHub release with binaries + checksums attached **before** publish (Zenodo snapshots at publish) → DOI; keep `CITATION.cff` `date-released` in sync with tag dates.
 - **Contributions**: when the first outside PR arrives, add a short
   contributor note (inbound = outbound, MIT OR Apache-2.0) BEFORE merging —
   sole copyright is what preserves the dual-licensing/relicensing freedom.

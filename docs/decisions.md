@@ -88,3 +88,12 @@ a workload silently serving on CPU. All of it is distilled into the
   full original stays in the author's local archive (gitignored).
 - Operator-facing knowledge lives in the [runbook](runbook.md); design
   rationale in [vision.md](vision.md).
+- **Citation metadata: single license string for Zenodo.** Zenodo's GitHub
+  DOI importer (invenioRDM, since late 2023) requires `CITATION.cff`
+  `license` as a single SPDX string and crashes on the spec-valid array
+  form with `Citation metadata load failed` (zenodo/zenodo#2515, open as
+  of 2026-11; cffconvert 1.3.x trips on arrays the same way). Decision:
+  the CFF carries `license: MIT`; the dual grant stays declared by
+  LICENSE-MIT + LICENSE-APACHE + Cargo.toml's `MIT OR Apache-2.0`
+  expression; the Zenodo record description states the dual license.
+  Restore the array if #2515 is ever fixed.
