@@ -41,7 +41,7 @@ the public roadmap).
 
 ## 🔲 Medium term — publication path
 
-- [ ] arXiv preprint (cs.DC): vendor-neutral accelerator resource abstraction + unified memory as first-class + fault model; accelrun as reference implementation
+- [ ] arXiv preprint (cs.DC): vendor-neutral accelerator resource abstraction + unified memory as first-class + fault model; accelrun as reference implementation (related-work base: [docs/sota-gaps.md](docs/sota-gaps.md))
 - [ ] JOSS tool paper — the repo already meets the bar (OSI license, quickstart, smoke test); submit after v0.1.0 + DOI exist
 - [ ] End-to-end verification of a **second backend (AMD ROCm)** — required to substantiate the portability thesis
 - [ ] Quantitative evaluation for the systems paper: attach overhead vs nvidia-container-toolkit (startup latency, footprint), cap accuracy on unified backends, workload-level parity

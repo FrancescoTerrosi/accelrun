@@ -46,6 +46,7 @@ Backend: nvidia | amd | metal | custom | cpu
 ```
 
 ## Open gaps in SotA this project addresses
+(Evidence and WERE/ARE status for each: [sota-gaps.md](sota-gaps.md))
 - No vendor-neutral accelerator *resource class* in OCI/CDI (only per-vendor devices).
 - Container runtimes are VRAM-centric; none understand unified-memory pools.
 - No cgroup controller for "GPU memory" inside unified RAM.

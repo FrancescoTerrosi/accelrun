@@ -144,6 +144,7 @@ Every failure you can hit has a mapped cause and fix — the [`runbook`](docs/ru
 - [`docs/vision.md`](docs/vision.md) — design rationale: abstract resource claims, unified memory, the fault model
 - [`docs/decisions.md`](docs/decisions.md) — the full decision log, including the five-bug chain behind the first end-to-end pass
 - [`docs/releasing.md`](docs/releasing.md) — maintainer checklist: pre-push verification, tagging, releases, and the Zenodo DOI setup
+- [`docs/sota-gaps.md`](docs/sota-gaps.md) — the evidence base for the four SotA gaps: primary sources, WERE vs ARE status (the related-work skeleton for the position paper)
 
 ## Development & AI assistance
 
