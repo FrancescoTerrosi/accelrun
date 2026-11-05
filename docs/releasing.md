@@ -15,8 +15,9 @@ git log --oneline                         # one commit: "Initial public import"
 git log -1 --pretty='%an <%ae>'
 #   -> Francesco Terrosi <33395865+FrancescoTerrosi@users.noreply.github.com>
 
-# no placeholders or noise anywhere (searches ALL history, not just the tree)
-git grep -n "<owner>\|2025" $(git rev-list --all)   # must print nothing
+# no placeholders anywhere (searches ALL history, not just the tree)
+# (this doc is excluded: history carries the old pattern literal, which would self-match)
+git grep -n "<owner>" $(git rev-list --all) -- ':!docs/releasing.md'   # must print nothing
 
 # the ignore set is intact — these must stay out of the public repo
 git status --porcelain --ignored | grep '^!!'
