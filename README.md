@@ -6,7 +6,7 @@
 
 ## Quickstart
 
-Requirements: a Linux host with **Docker** and a **working GPU driver** (`nvidia-smi` OK on the host). accelrun does not install drivers, runtimes, or toolkits — that is the point. No GPU? You get graceful CPU fallback instead.
+Requirements: a Linux host with **Docker** and a **working GPU driver** (`nvidia-smi` OK on the host — on WSL2 the *Windows* driver provides this inside the distro). accelrun does not install drivers, runtimes, or toolkits — that is the point. No GPU? You get graceful CPU fallback instead.
 
 Build the binary (no Rust toolchain needed):
 
@@ -49,7 +49,7 @@ The GPU is really in the container — verify with real CUDA compute (driver API
 
 If that prints `PASS`, you have PTX-JIT'd vector-add running in a container launched with zero toolkit involvement.
 
-**Status: production-verified end-to-end** on a bare-metal Fedora host (RTX 5070 Ti, driver 580 open kernel module, no NVIDIA Container Toolkit): the smoke test above plus a 14B LLM served at "100% GPU" per `ollama ps`, in an accelrun-launched container. Other backends (AMD ROCm, Apple Metal, custom TOML probes) are detected, but NVIDIA is the only one verified end-to-end so far.
+**Status: production-verified end-to-end** on a bare-metal Fedora host (RTX 5070 Ti, driver 580 open kernel module, no NVIDIA Container Toolkit): the smoke test above plus a 14B LLM served at "100% GPU" per `ollama ps`, in an accelrun-launched container. Other backends (AMD ROCm, Apple Metal, custom TOML probes) are detected, but NVIDIA is the only one verified end-to-end so far. WSL2's toolkit-free attach (`/dev/dxg` + the Windows driver's `/usr/lib/wsl/lib` — still no NVIDIA Container Toolkit) is implemented and argv-verified on a synthetic device, hardware verification pending.
 
 ## What it is — and what it is not
 
@@ -65,15 +65,16 @@ If that prints `PASS`, you have PTX-JIT'd vector-add running in a container laun
 
 | Mode | When it engages | Requirements |
 |---|---|---|
-| **direct** (default) | bare-metal host with `/dev/nvidia*` nodes | none — works on any Docker |
+| **direct** (default) | bare-metal host with `/dev/nvidia*` nodes, or WSL2 (`/dev/dxg` + Windows driver) | none — works on any Docker |
 | **cdi** (`--cdi` flag) | fleet tooling wants vendor-neutral specs | Docker ≥ 25, spec in the daemon CDI dir |
-| `--gpus all` (automatic last resort) | driver works but no numbered nodes are visible (WSL-like hosts) | NVIDIA Container Toolkit — accelrun errors with remediation if absent |
+| `--gpus all` (automatic last resort) | driver works but neither numbered nodes nor `/dev/dxg` are visible (restricted namespaces) | NVIDIA Container Toolkit — accelrun errors with remediation if absent |
 
 Direct mode injects, with no toolkit involved:
 
 - numbered `/dev/nvidia*` device nodes **and** control nodes (`nvidiactl`, `nvidia-uvm`, `nvidia-uvm-tools`)
 - the full driver-library set (`libcuda`, NVML, PTX JIT, compiler, ...) bind-mounted read-only — mirrored into `/usr/lib/x86_64-linux-gnu` so Debian/Ubuntu images' loader finds them
 - host `nvidia-smi` bind-mounted into the container
+- on WSL2, the same toolkit-free attach takes the WSL shape: `/dev/dxg` (the paravirt compute node) plus the Windows driver's `/usr/lib/wsl/lib` bind-mounted read-only, with `LD_LIBRARY_PATH` pointing the loader at it — mirroring nvidia-container-toolkit's own WSL mode
 - the `ACCEL_*` environment contract, plus `NVIDIA_VISIBLE_DEVICES=all` and `NVIDIA_DRIVER_CAPABILITIES=compute,utility`
 
 Use `--dry-run` at any time to print the exact `docker` argv accelrun would run — the first debugging tool.

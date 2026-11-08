@@ -40,8 +40,9 @@ print("== accelrun env contract ==")
 for k in ("ACCEL_BACKEND", "ACCEL_MEM_BYTES", "ACCEL_UNIFIED", "ACCEL_DEVICE", "ACCEL_NAME"):
     print(f"  {k:16s} = {os.environ.get(k, '<unset>')}")
 if os.environ.get("ACCEL_BACKEND") == "cpu":
-    print("  (cpu fallback selected — no GPU expected;"
-          " lower --mem or make /dev/nvidia* visible)")
+    print("  (cpu fallback selected — no GPU expected; lower --mem, or make"
+          " the GPU visible to the probe: /dev/nvidia* on Linux, /dev/dxg"
+          " + the Windows driver on WSL)")
 
 print("\n== CUDA driver API (host libcuda.so.1 via accelrun bind-mount) ==")
 try:
