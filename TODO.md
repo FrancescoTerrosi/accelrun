@@ -38,6 +38,7 @@ the public roadmap).
 - [ ] Optional: `cargo publish` to crates.io (metadata already complete)
 - [ ] Contributor note (**inbound = outbound, MIT OR Apache-2.0**) *before* merging the first outside PR — sole copyright is what preserves the relicensing freedom
 - [ ] Triage incoming issues from the runbook failure map; enrich docs from recurring questions
+- [ ] WSL2 hardware verification of the dxg direct attach — first `gpu-smoke.py` PASS on a WSL host (attach implemented + argv-verified 2026-11-08; ladder + `[wsl]` hypotheses in runbook)
 
 ## 🔲 Medium term — publication path
 

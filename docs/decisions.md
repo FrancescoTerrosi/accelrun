@@ -195,3 +195,51 @@ reference implementation.
   in a container with no C toolchain.
 - **Not done here, deliberately**: no `--security-opt` passthrough, no
   per-GPU selection, no change to `--mem` semantics for unified backends.
+
+## 2026-11 — WSL2 direct attach (dxg), toolkit-free
+
+Motivation: a WSL2 smoke run landed on the CPU backend (contract printed,
+exit 1 was gpu-smoke.py's own `die()` on dlopen — accelrun behaving as
+designed) because two probe assumptions break on WSL2: numbered
+`/dev/nvidia*` nodes never exist there (the GPU is the paravirt `/dev/dxg`
+node), and nvidia-smi lives at `/usr/lib/wsl/lib/` which non-Ubuntu distros
+leave off PATH, so the PATH-only `Command::new("nvidia-smi")` smi-fallback
+never fired. The run also exposed a wrong claim in oci.rs's `--gpus all`
+error path — "On WSL this is unavoidable (docker needs the toolkit)" —
+which is false: the toolkit's own WSL mode is just `/dev/dxg` +
+`/usr/lib/wsl/lib` + `LD_LIBRARY_PATH`, all of which accelrun can inject
+itself.
+
+- **Probe (nvidia.rs)**: new `smi()` helper tries `/usr/lib/wsl/lib/nvidia-smi`
+  first, then PATH. `detect()` keeps the verified bare-metal path untouched;
+  when numbered nodes are absent but `/dev/dxg` exists AND smi confirms an
+  NVIDIA GPU (dxg alone is vendor-neutral DirectCompute and proves nothing),
+  devices becomes `["/dev/dxg"]` → direct attach. Driver-present-but-no-
+  nodes-and-no-dxg (restricted namespaces) still degrades to the `--gpus all`
+  last resort exactly as before.
+- **Attach (oci.rs)**: the dxg node rides the existing generic `--device`
+  loop; the nvidia arm gains a WSL branch mirroring libnvidia-container's
+  WSL mode: `/usr/lib/wsl/lib` bind-mounted `:ro` at its identity path +
+  `-e LD_LIBRARY_PATH=/usr/lib/wsl/lib` + smi mounted to `/usr/bin` for
+  parity with the bare-metal path. The production-verified bare-metal argv
+  now sits in the `else` branch, content-identical (checked with
+  `git diff -w`: additions only). The corrected error text names the real
+  remediations (Windows driver → dxg appears; toolkit for `--gpus all`).
+- **Known caveats** (runbook WSL section + failure map): `docker -e` cannot
+  append, so an image-set `LD_LIBRARY_PATH` is overridden; Docker Desktop's
+  daemon lives in its own distro, so `--device /dev/dxg` and the wsl-lib
+  bind resolve in that VM's filesystem — the supported path is docker
+  native to the WSL distro; the driver must be the Windows-side one (a
+  Linux driver inside WSL is unsupported and breaks the wsl-lib mount).
+- **Verification status**: argv-verified on a synthetic dxg accelerator —
+  `cargo test nvidia_wsl_dry_run_argv_assembles` (10/10 suite), dry-run argv
+  eyeballed: `--device /dev/dxg -v /usr/lib/wsl/lib:/usr/lib/wsl/lib:ro -e
+  LD_LIBRARY_PATH=/usr/lib/wsl/lib` and none of the bare-metal artifacts.
+  NEVER run on WSL hardware — the same tier amd-smoke.py held before its
+  hardware session. The author's WSL2 host owns the first gpu-smoke.py PASS
+  (runbook WSL ladder; TODO short term).
+- **No-`cc` dev-container recipe, second extension**: the fakelib needs
+  BOTH `libgcc_s.so.1` (runtime name — what the previous recipe recorded)
+  AND `libgcc_s.so -> system libgcc_s.so.1` (the LINKER name: lld resolves
+  `-lgcc_s` against `libgcc_s.so`, which is why a `.so.1`-only symlink
+  fails the test build). Recorded for the next bootstrap.
