@@ -27,7 +27,7 @@ Inventory (what the project leaves behind, and where):
   filesystem  /tmp/accelrun-cdi (CDI spec written on EVERY `run`),
               CDI specs registering accel.local/gpu in /etc/cdi or
               /var/run/cdi (--cdi mode), /sys/fs/cgroup/accelrun
-              (cgroup v2 memory cap on unified backends)
+              (legacy: cgroup cap written by pre-2026-11 builds only)
   via --all   ~/.config/accelrun/ (custom probes.toml — user content),
               accelrun binaries found on $PATH (verified by ELF magic +
               ACCEL_* string signature), /tmp/fakelib (dev-host linker
@@ -334,11 +334,12 @@ else
   fi
 
   echo
-  echo "── host filesystem: cgroup v2 memory cap ──"
-  # /sys/fs/cgroup/accelrun: created on unified-backend runs (memory.max =
-  # budget hint; cgroup.procs points at the accelrun process itself, which is
-  # gone after exit). Removal needs root and an empty dir (the kernel refuses
-  # rmdir while members/children remain).
+  echo "── host filesystem: cgroup v2 memory cap (legacy) ──"
+  # /sys/fs/cgroup/accelrun: created ONLY by pre-2026-11 builds (the old
+  # CLI-side cap wrote memory.max = budget and moved the accelrun process
+  # itself into the cgroup; current builds enforce via docker --memory /
+  # CDI cgroupRules instead and write nothing here). Removal needs root and
+  # an empty dir (the kernel refuses rmdir while members/children remain).
   if [ -d /sys/fs/cgroup/accelrun ]; then
     if $DRY_RUN; then
       echo "      would run: rmdir /sys/fs/cgroup/accelrun (recursively, deepest first)"

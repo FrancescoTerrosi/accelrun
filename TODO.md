@@ -43,7 +43,8 @@ the public roadmap).
 
 - [ ] arXiv preprint (cs.DC): vendor-neutral accelerator resource abstraction + unified memory as first-class + fault model; accelrun as reference implementation (related-work base: [docs/sota-gaps.md](docs/sota-gaps.md))
 - [ ] JOSS tool paper — the repo already meets the bar (OSI license, quickstart, smoke test); submit after v0.1.0 + DOI exist
-- [ ] End-to-end verification of a **second backend (AMD ROCm)** — required to substantiate the portability thesis
+- [ ] End-to-end verification of a **second backend (AMD ROCm)** — required to substantiate the portability thesis. The attach path is now implemented and argv-verified (2026-11 code session, `docs/decisions.md`): kfd+renderD injection, `--group-add` node gids, sysfs-first probe with a real APU heuristic, ROCm userspace bind-mounts, `tests/amd-smoke.py` (never run on hardware). The hardware session owns the first PASS — expect a bug chain (the fixes were applied blind, per the runbook's [amd] hypotheses)
+- [ ] Gemmini custom-accelerator case study (first non-NVIDIA hardware verification; also first exercise of the unified-memory cap) — plan: [docs/gemmini-case-study-plan.md](gemmini-case-study-plan.md) (Tier 0 needs no hardware)
 - [ ] Quantitative evaluation for the systems paper: attach overhead vs nvidia-container-toolkit (startup latency, footprint), cap accuracy on unified backends, workload-level parity
 - [ ] Fault-injection study of the FMEA registry (each fault: inject → detect → mitigate) — the most novel research angle
 - [ ] Numeric-drift study across backends for one IR-compiled workload

@@ -18,6 +18,12 @@ Direct mode injects: numbered device nodes + control nodes (`nvidiactl`,
 their host path **and** mirrored into `/usr/lib/x86_64-linux-gnu` (cross-distro
 loader paths), host `/usr/bin/nvidia-smi`, and the env contract (`ACCEL_*`).
 
+For AMD the same direct-mode philosophy applies (details and ladder in the
+[AMD ROCm attach](#amd-rocm-attach-implemented-hardware-verification-pending)
+section): `/dev/kfd` + `/dev/dri/renderD*` nodes, `--group-add` for the
+nodes' groups, the host ROCm userspace bind-mounted and mirrored, host
+`rocminfo`/`amd-smi`/`rocm-smi`, and the same `ACCEL_*` contract.
+
 ## Command reference
 
 ```
@@ -82,13 +88,120 @@ print('v2 ->', c.cuMemGetInfo_v2(ctypes.byref(f), ctypes.byref(t)))
 print('GiB =', t.value/2**30)"
 ```
 
-## Failure map (every line is a bug we actually hit)
+## AMD ROCm attach (implemented; hardware verification pending)
+
+Same direct-mode philosophy as NVIDIA, no AMD Container Runtime Toolkit:
+
+- `/dev/kfd` (THE compute interface, shared by all GPUs — AMD's own
+  toolkit-free docker recipe is exactly `--device /dev/kfd --device
+  /dev/dri`) plus every `/dev/dri/renderD*` (per-GPU buffer objects).
+  `card*` master nodes are NOT passed: mode-setting is not needed for
+  compute.
+- `--group-add <gid>` for each node's owning group (stat'd from the nodes
+  themselves — the `render` gid is not standardized across distros):
+  docker's `--device` only relaxes the **cgroup** side of access; the node's
+  file permissions still win, and AMD nodes are 0660 root:video/render
+  (NVIDIA's are 0666, which is why the NVIDIA path never needed this).
+- Host ROCm userspace bind-mounted read-only and mirrored into
+  `/usr/lib/x86_64-linux-gnu` (cross-distro loader fix, same as NVIDIA):
+  `libhsa-runtime64`/`libhsakmt` (KFD userspace — the "libcuda" analog),
+  `libamdhip64` (HIP runtime), `libamd_comgr` (code-object JIT),
+  `libdrm_amdgpu`/`libdrm` (render-node GEM path), `libelf`/`libnuma`
+  (deps slim images don't carry). Plus `rocminfo`/`amd-smi`/`rocm-smi`
+  when present on the host.
+- `accelrun probe` prints an AMD diagnostics block (kfd, renderD list,
+  per-card PCI class / vram / gtt, tool presence).
+
+AMD-specific verification ladder (each step must PASS once in its life):
+
+1. Host `rocminfo` (or `amd-smi list`) — necessary, **not** sufficient.
+2. `accelrun probe` — `amd` backend listed with sane memory + devices
+   (kfd first, then renderD nodes).
+3. `--dry-run` — argv must contain `--device /dev/kfd`, the renderD
+   `--device`s, the stat'd node gids via `--group-add` (present when nodes
+   are group-owned, e.g. `video`/`render`; absent on `0666 root:root`
+   hosts), the ROCm lib binds, and **no** `NVIDIA_VISIBLE_DEVICES`.
+4. `docker inspect <c> --format '{{json .HostConfig.Devices}}'` — kfd AND
+   renderD present (the pre-fix probe injected only renderD — the AMD
+   analog of NVIDIA's "No devices were found").
+5. In-container `ls -l /dev/kfd` (perms + group) and `rocminfo`.
+6. `tests/amd-smoke.py` on `python:3.12-slim` — HSA load, KFD queue
+   creation, GEM alloc, bidirectional DMA round-trip. No kernel launch
+   (hand-written AMDGCN is impractical the way PTX is; kernel-level
+   compute is proven by the workload — e.g. ollama "100% GPU").
+7. Workload check.
+
+APU note: unified memory (Ryzen iGPU / Strix Halo class) is detected via
+PCI class `0x0380xx` or the VRAM carve-out signature and reported as
+`ACCEL_UNIFIED=true` — the budget is then hard-enforced via docker
+`--memory` (direct mode) or the CDI spec's `cgroupRules` (`--cdi` mode);
+discrete VRAM stays hint-only (see `docs/vision.md`).
+
+### Hardware session via cloud rental (no AMD GPU needed on premises)
+
+Landscape checked 2026-11. The only *cheap* cloud AMD GPU with official
+ROCm support is the **Azure NVads V710 v5** series (Radeon PRO V710,
+gfx1101, RDNA3 — dedicated `amdrocm10.0-gfx1101` meta-package;
+Azure's docs cover Ubuntu 22.04/24.04, and AMD's own CI fleet uses this
+series). Prices: NV4ads 1/6-GPU 4-GiB **$0.333/hr** on-demand (eastus;
+~$0.06 spot — eviction mid-session is the trade), NV8ads $0.67/hr,
+NV12ads $1.00/hr, NV24ads (full GPU) $2.00/hr. A whole session including
+setup is ~$2–4; deallocate afterwards (only disk is billed) and the VM
+stays warm for re-runs. Alternatives: AWS g4ad (Radeon PRO V520, gfx1010,
+~$0.40–0.70/hr) — attach/HSA works but gfx1010 is *unofficial* in ROCm
+(math libs need custom builds) and AWS often starts accounts at 0 vCPU
+quota for it; Azure NGads V620 (gfx1030, Microsoft-published drivers
+only); Azure ND MI300X v5 (data-center, whole 8-GPU nodes, overkill).
+GCP exposes no AMD GPUs; GitHub Actions has no AMD runners. Consumer-card
+verification (RX 7900 class) needs Vast.ai/bare metal — spotty hosts.
+
+Session checklist:
+
+1. Create the VM (e.g. `Standard_NV4ads_V710_v5`, Ubuntu 24.04, eastus)
+   **without Secure Boot/Trusted Launch** — `amdgpu-dkms` is unsigned and
+   will not load under Secure Boot (stop/deallocate → disable → start
+   if it is on).
+2. Driver + ROCm per Microsoft's NVads V710 guide (or the Azure AMD GPU
+   Driver Extension / preloaded marketplace image): `apt install
+   amdgpu-dkms`, then AMD's stable repo + `amdrocm10.0-gfx1101` (package
+   name drifts with ROCm releases), `usermod -a -G render,video`, reboot,
+   install docker.
+3. Host baseline: `rocminfo | grep gfx` shows gfx1101; `ls -l /dev/kfd
+   /dev/dri/renderD*` shows the 0660 video/render nodes (note the gids —
+   the `--group-add` logic stat's them).
+4. Build accelrun via the Docker image (no Rust on host needed) and run
+   the AMD ladder above. `--mem 2Gi` fits the 4-GiB frame buffer cleanly;
+   `--mem 8Gi` demonstrates the graceful-degradation path: the warning
+   must fire naming `amd` (8 GiB requested > 4 GiB VRAM) and the backend
+   must stay `amd` — the pre-2026-11 code silently selected CPU here
+   (P0 bug, fixed with the select.rs rework; unit-tested, see
+   `gpu_short_on_budget_beats_cpu_that_meets_it`).
+5. Deallocate the VM; record the PASS in `docs/decisions.md`, flip the
+   [amd] failure-map rows from hypotheses to facts, close the TODO item.
+
+What a rental cannot verify: the APU/unified path (no APU VMs exist —
+the `is_unified` heuristic stays unit-tested until a Ryzen/Strix Halo
+box is at hand; note NV4ads reports exactly 4 GiB VRAM, sitting on the
+carve-out boundary and testing it from the discrete side), per-GPU
+selection (single-GPU VM), and MI300X-class userspace specifics.
+
+## Failure map
+
+Lines marked **[nvidia]** are bugs we actually hit; lines marked **[amd]**
+are *hypotheses* from the 2026-11 code session — the AMD hardware session
+confirms or retires them (the attach path has never run on AMD silicon).
 
 | Symptom | Root cause | Fix |
 |---|---|---|
-| in-container nvidia-smi: "No devices were found" | numbered `/dev/nvidia[0-9]*` not injected (glob class parser bug; or WSL-like host with only control nodes) | inspect `HostConfig.Devices`; fixed parser; WSL hosts → toolkit + `--gpus` path |
-| `dlopen("libcuda.so.1")` fails in a Debian-family image (Fedora host) | identity bind of `/usr/lib64` invisible to the multiarch loader | libs mirrored into `/usr/lib/x86_64-linux-gnu` — keep that in any future lib logic |
-| exit 127, "nvidia-smi: not found" on alpine | musl cannot exec the host glibc binary | never use alpine/musl for NVIDIA userspace; `python:3.12-slim` |
+| **[nvidia]** in-container nvidia-smi: "No devices were found" | numbered `/dev/nvidia[0-9]*` not injected (glob class parser bug; or WSL-like host with only control nodes) | inspect `HostConfig.Devices`; fixed parser; WSL hosts → toolkit + `--gpus` path |
+| **[amd]** in-container rocminfo/HIP: 0 GPU agents | `/dev/kfd` not injected (the pre-fix probe passed only renderD; kfd is THE compute interface) | inspect `HostConfig.Devices`; must contain kfd + renderD |
+| **[amd]** hipGetDeviceCount=0 as non-root but works as root | node file perms: docker `--device` doesn't relax them (kfd is 0660 video/render group; render gid is not standardized) | accelrun passes `--group-add <node gid>`; verify it is in the argv |
+| **[nvidia]** `dlopen("libcuda.so.1")` fails in a Debian-family image (Fedora host) | identity bind of `/usr/lib64` invisible to the multiarch loader | libs mirrored into `/usr/lib/x86_64-linux-gnu` — keep that in any future lib logic |
+| **[amd]** `dlopen("libhsa-runtime64.so.1")` fails (same shape) | same multiarch issue for `/opt/rocm/lib` / `/usr/lib64` binds | ROCm libs are mirrored the same way |
+| **[amd]** HSA/HIP init fails with EPERM/mmap errors | seccomp blocking mappings (AMD marks `seccomp=unconfined` optional, recommended for numactl-based HPC) | reproduce by adding `--security-opt seccomp=unconfined` manually — accelrun has no passthrough for it yet (known gap) |
+| **[amd]** corrupt round-trips / symbol errors with rocm-carrying images (rocm/*, rocm/pytorch) | host ROCm bind-mounts SHADOW the image's own copies; version skew | keep host ROCm >= image ROCm, or strip the lib binds from a `--dry-run` argv |
+| **[amd]** device count ok, gfx/arch errors at runtime | host ROCm version does not support the GPU arch | upgrade host ROCm; `HSA_OVERRIDE_GFX_VERSION` is a user-side escape hatch (accelrun will not set it) |
+| **[nvidia]** exit 127, "nvidia-smi: not found" on alpine | musl cannot exec the host glibc binary | never use alpine/musl for NVIDIA userspace; `python:3.12-slim` (same applies to ROCm userspace) |
 | "unknown command 'X' for 'Y'" | image ENTRYPOINT prefixes the container command | pass just the subcommand (ollama: `serve`) or use `exec` |
 | container name / port conflicts on relaunch | with `-d` there is no `--rm`: failed containers persist | `docker rm -f <name>` before relaunching |
 | `cuMemGetInfo` → 201 with a healthy context, on host AND container, user AND root | legacy unversioned v1 symbol: driver 580 returns `CUDA_ERROR_INVALID_CONTEXT` from it even on a healthy machine | always call `*_v2` (`cuMemGetInfo_v2`, `cuMemAlloc_v2`, `cuMemcpy*_v2`, `cuMemFree_v2`) |
@@ -107,6 +220,18 @@ print('GiB =', t.value/2**30)"
    process actually opened. No strace required.
 5. `dmesg` for NVRM/Xid/uvm lines — RM-level failures log there.
 
+## Cleanup
+
+`./clean.sh` uninstalls everything accelrun leaves behind — inside **and**
+outside the repo: build artifacts (`target/`, local binaries), docker objects
+(containers matched via the `ACCEL_*` env contract, the `accel` network,
+the `ollama-data` volume — models re-download —, the image), `/tmp/accelrun-cdi`,
+CDI specs registered under `/etc/cdi`/`/var/run/cdi`, and (legacy,
+pre-2026-11 builds only) the `/sys/fs/cgroup/accelrun` cgroup. `--all` adds user-owned pieces
+(`~/.config/accelrun`, installed binaries on `$PATH`, dev-host `/tmp` dirs).
+Run `./clean.sh --dry-run` first; interactive prompts by default; it never
+runs global docker prunes (build cache is left to `docker system df -v` + you).
+
 ## Host requirements (the boring checklist)
 
 - driver + device nodes: `ls /dev/nvidia*` → `nvidia0`, `nvidiactl`,
@@ -122,4 +247,11 @@ print('GiB =', t.value/2**30)"
 - no `--entrypoint` passthrough (one-shot commands in ENTRYPOINT images)
 - no hard VRAM cap (hint only; consumer cards have no MIG)
 - single-node launcher; the CDI spec is the k8s integration surface
-- Alpine/musl unsupported for NVIDIA userspace
+- Alpine/musl unsupported for NVIDIA userspace (and for the same reason,
+  ROCm userspace — glibc images only)
+- AMD: no `--security-opt` passthrough (seccomp=unconfined sometimes wanted
+  per AMD docs for numactl/HPC); no per-GPU selection (whole-host passthrough
+  — restrict with `ROCR_VISIBLE_DEVICES` on the workload side); the smoke
+  test covers the memory/queue path, not a kernel launch
+- AMD attach path is implemented but **not hardware-verified** (TODO medium
+  term) — everything above marked [amd] is a hypothesis until that session

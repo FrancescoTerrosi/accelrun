@@ -20,7 +20,9 @@ and injects devices / env vars / memory caps via direct argv injection
 1. Abstract at the **resource/claim level** (CDI + OCI + cgroups), NOT by emulating
    CUDA. Workloads stay portable via Triton / MLIR / SYCL / WebGPU / ONNX-RT.
 2. **Unified memory** (Apple UMA, AMD APU, CXL pools) is a first-class backend:
-   cap it with cgroup v2 `memory.max`, since there is no hardware VRAM limit.
+   the budget is *enforced* with the launcher's real levers — docker
+   `--memory` (direct mode) or the CDI spec's `cgroupRules` (`--cdi` mode);
+   both land in the container's cgroup v2 `memory.max`.
 3. Discrete VRAM on consumer NVIDIA cannot be hard-capped without MIG — expose
    the budget as an app-level contract (`ACCEL_MEM_BYTES`) instead. Documented gap.
 4. Safety/RAMS layer: FMEA-style fault registry with
@@ -41,8 +43,8 @@ accelrun run --mem 16Gi --image X -- cmd      (probe → select → inject)
            (spec emitted every run — the orchestrator integration surface)
         ▼
 Backend: nvidia | amd | metal | custom | cpu
-        (+ best-effort cgroup v2 memory.max cap on unified backends;
-         FMEA detection hooks throughout)
+        (+ hard docker --memory cap on unified backends
+         (cgroupRules in --cdi mode); FMEA detection hooks throughout)
 ```
 
 ## Open gaps in SotA this project addresses

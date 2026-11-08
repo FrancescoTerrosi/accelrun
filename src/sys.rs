@@ -1,28 +1,15 @@
-//! cgroups.rs and fault.rs merged: cgroup v2 memory cap for unified backends
-//! plus the FMEA-style fault registry.
+//! FMEA-style fault registry with detection hooks.
+//!
+//! History: this file also wrote a cgroup-v2 memory cap for unified backends
+//! — removed 2026-11. It moved the *accelrun CLI's own PID* into a cgroup,
+//! but containers are placed in cgroups by dockerd, so the cap never reached
+//! the workload (and its "capped unified RAM" success message was fiction).
+//! The real enforcement levers are the launcher-issued `docker --memory`
+//! (direct mode, oci.rs) and the CDI spec's `cgroupRules` (`--cdi` mode,
+//! cdi.rs). See docs/decisions.md, model-conformance fixes.
 
-use std::fs;
-
-pub fn apply_memory_cap(tag: &str, bytes: u64) -> std::io::Result<()> {
-    let dir = format!("/sys/fs/cgroup/accelrun/{}", tag);
-    fs::create_dir_all(&dir)?;
-    fs::write(format!("{}/memory.max", dir), bytes.to_string())?;
-    fs::write(format!("{}/cgroup.procs", dir), std::process::id().to_string())?;
-    Ok(())
-}
-
-/// Read OOM events — used by the fault layer to detect UnifiedHostOOM.
-pub fn oom_count(tag: &str) -> u64 {
-    fs::read_to_string(format!("/sys/fs/cgroup/accelrun/{}/memory.events", tag))
-        .ok()
-        .and_then(|t| {
-            t.lines()
-                .find(|l| l.starts_with("oom "))
-                .and_then(|l| l.split_whitespace().nth(1))
-                .and_then(|s| s.parse().ok())
-        })
-        .unwrap_or(0)
-}
+use std::path::Path;
+use std::process::Command;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Fault {
@@ -47,7 +34,7 @@ impl Fault {
     pub fn mitigation(&self) -> &'static str {
         match self {
             Fault::ProbeFalseNegative => "re-run `accelrun probe`; check device nodes",
-            Fault::UnifiedHostOOM => "lower --mem below total RAM; keep cgroup memory.max set",
+            Fault::UnifiedHostOOM => "lower --mem below total RAM (docker --memory caps the container)",
             Fault::VramOvercommit => "use ACCEL_MEM_BYTES app-level budget; quantize model",
             Fault::BackendCrashMidRun => "check dmesg; re-run with ACCEL_BACKEND=cpu fallback",
             Fault::NumericDrift => "compare output hashes across backends; set tolerance in test",
@@ -55,17 +42,39 @@ impl Fault {
     }
 }
 
+/// Cumulative OOM kills since boot (kernel counter, /proc/vmstat `oom_kill`).
+/// Host-level evidence for the UnifiedHostOOM fault: a unified-RAM container
+/// that OOMs the whole host increments this. (The old hook read the
+/// `memory.events` of a cgroup the CLI had created for itself — never the
+/// container's — so it could only ever read 0.)
+pub fn host_oom_kills() -> u64 {
+    std::fs::read_to_string("/proc/vmstat")
+        .ok()
+        .and_then(|t| {
+            t.lines()
+                .find(|l| l.starts_with("oom_kill "))
+                .and_then(|l| l.split_whitespace().nth(1))
+                .and_then(|s| s.parse().ok())
+        })
+        .unwrap_or(0)
+}
+
 pub fn detect(f: Fault, ctx_backend: &str) -> bool {
     match f {
-        Fault::UnifiedHostOOM => oom_count("default") > 0,
+        Fault::UnifiedHostOOM => host_oom_kills() > 0,
         Fault::ProbeFalseNegative => {
-            // Only flag when nvidia-smi lists GPUs but the *selected* backend
-            // is NOT nvidia and no device nodes exist. If the smi-fallback
-            // already selected nvidia, that is a correct detection.
-            if ctx_backend == "nvidia" {
+            // "GPU present but not detected -> silently ran on CPU": only
+            // meaningful when selection actually landed on CPU (any other
+            // backend means the accelerator WAS detected). Presence sources
+            // mirror the probes: `nvidia-smi -L` (works even without numbered
+            // device nodes — the WSL case) and `/dev/kfd` (the AMD probe's
+            // gate). The pre-fix hook checked nvidia-smi only, so an AMD
+            // probe miss was structurally invisible. Custom TOML probes have
+            // no generic presence signal — uncovered, documented gap.
+            if ctx_backend != "cpu" {
                 return false;
             }
-            let listed = std::process::Command::new("nvidia-smi")
+            let nvidia_listed = Command::new("nvidia-smi")
                 .arg("-L")
                 .output()
                 .map(|o| {
@@ -73,7 +82,7 @@ pub fn detect(f: Fault, ctx_backend: &str) -> bool {
                         && String::from_utf8_lossy(&o.stdout).lines().any(|l| l.contains("GPU"))
                 })
                 .unwrap_or(false);
-            listed && crate::probe::glob_dev("/dev/nvidia[0-9]*").is_empty()
+            nvidia_listed || Path::new("/dev/kfd").exists()
         }
         _ => false,
     }

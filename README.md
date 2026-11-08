@@ -49,11 +49,11 @@ The GPU is really in the container — verify with real CUDA compute (driver API
 
 If that prints `PASS`, you have PTX-JIT'd vector-add running in a container launched with zero toolkit involvement.
 
-**Status: production-verified end-to-end** on a bare-metal Fedora host (RTX 5070 Ti, driver 580 open kernel module, no NVIDIA Container Toolkit): the smoke test above plus a 14B LLM served at "100% GPU" per `ollama ps`, in an accelrun-launched container. Other backends (AMD ROCm, Apple Metal, custom TOML probes) are detected, but NVIDIA is the only one verified end-to-end so far.
+**Status: production-verified end-to-end** on a bare-metal Fedora host (RTX 5070 Ti, driver 580 open kernel module, no NVIDIA Container Toolkit): the smoke test above plus a 14B LLM served at "100% GPU" per `ollama ps`, in an accelrun-launched container. AMD ROCm's toolkit-free attach path is fully implemented (kfd + renderD nodes, host ROCm userspace bind-mounts, `--group-add` node permissions — argv-verified on a synthetic device, see the [runbook](docs/runbook.md)) but not yet hardware-verified. Apple Metal and custom TOML probes are detected; NVIDIA remains the only backend verified end-to-end on hardware so far.
 
 ## What it is — and what it is not
 
-**It is** a single-node, zero-dependency launcher: probe → select → inject → `docker run`. Portability lives in the workload (Triton / MLIR / SYCL / WebGPU / ONNX-RT), exposed to it via the `ACCEL_*` contract.
+**It is** the reference implementation of a vendor-neutral accelerator resource model: the `ACCEL_*` claim, bandwidth-ranked selection with graceful degradation, unified-vs-dedicated memory as a first-class distinction (enforced on unified backends, hinted on discrete VRAM), and an FMEA fault model. The model is the contribution; the binary is its single-node, zero-dependency demonstration: probe → select → inject → `docker run`. Portability lives in the workload (Triton / MLIR / SYCL / WebGPU / ONNX-RT), exposed to it via the `ACCEL_*` contract.
 
 **It is not:**
 - **CUDA emulation** — portability is at the workload's IR level (same model as LLVM/XLA), not in the launcher.
@@ -76,6 +76,13 @@ Direct mode injects, with no toolkit involved:
 - host `nvidia-smi` bind-mounted into the container
 - the `ACCEL_*` environment contract, plus `NVIDIA_VISIBLE_DEVICES=all` and `NVIDIA_DRIVER_CAPABILITIES=compute,utility`
 
+For AMD (ROCm), the same direct pattern injects `/dev/kfd` + `/dev/dri/renderD*`
+(the compute interface and the GEM nodes), `--group-add` for the nodes'
+owning groups (docker's `--device` does not relax file permissions), and the
+host ROCm userspace (`libhsa-runtime64`, `libamdhip64`, comgr, `libdrm_amdgpu`,
+...) mirrored into the multiarch dir the same way — details, the AMD
+verification ladder, and its failure map live in the [runbook](docs/runbook.md).
+
 Use `--dry-run` at any time to print the exact `docker` argv accelrun would run — the first debugging tool.
 
 ## The `ACCEL_*` contract
@@ -86,7 +93,7 @@ What the container sees, regardless of the backend that served it:
 |---|---|
 | `ACCEL_BACKEND` | selected backend: `nvidia` \| `amd` \| `metal` \| `custom` \| `cpu` |
 | `ACCEL_NAME` | accelerator name as probed (`RTX 5070 Ti`, `tenstorrent`, ...) |
-| `ACCEL_MEM_BYTES` | requested memory budget (bytes) — a hint for the app, not a hard cap |
+| `ACCEL_MEM_BYTES` | requested memory budget (bytes) — hard cap on unified backends (docker `--memory`), a hint on discrete VRAM (no MIG) |
 | `ACCEL_UNIFIED` | `true` if memory is unified with host RAM (APU, Apple, CPU) |
 | `ACCEL_DEVICE` | primary device node (empty when backend has none) |
 
@@ -105,7 +112,7 @@ accelrun [run] --mem SIZE [--unified] [--name N] [--network NET]
 ```
 
 - `run` is optional: bare flags are treated as `run`.
-- `--mem` accepts `Gi` / `Mi` / raw bytes; if no backend meets the budget, the best accelerator is picked anyway (bandwidth-ranked, real GPU preferred over CPU) — CPU only when no accelerator exists.
+- `--mem` accepts `Gi` / `Mi` / raw bytes; if no backend meets the budget, the best accelerator is picked anyway (bandwidth-ranked, real GPU preferred over CPU) with a loud stderr warning naming the degraded backend — CPU only when no accelerator exists. Unified backends are hard-capped via docker `--memory`; discrete VRAM is hint-only.
 - `-d` and `--restart` drop `--rm`, so failed or one-shot detached containers stay behind — remove with `docker rm`.
 - ENTRYPOINT-bearing images prefix `CMD` (e.g. pass `serve` for `ollama/ollama`, not `ollama serve`). For one-shots prefer ENTRYPOINT-less images like `python:3.12-slim`.
 

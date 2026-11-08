@@ -70,6 +70,14 @@ fn run(argv: &[String]) -> Result<i32, String> {
                     println!("{}", line);
                 }
             }
+            // amd::diagnostics() returns [] on hosts with no AMD hardware
+            // (no /dev/kfd and no amdgpu sysfs cards), so this prints nothing
+            // on NVIDIA-only machines.
+            for line in probe::amd::diagnostics() {
+                if !line.is_empty() {
+                    println!("{}", line);
+                }
+            }
             Ok(0)
         }
         "run" => {
@@ -82,18 +90,30 @@ fn run(argv: &[String]) -> Result<i32, String> {
             };
             let (acc, fallback) = select::select(accels, &req);
             if fallback {
-                eprintln!("[accelrun] WARNING: fell back to CPU (possible fault: ProbeFalseNegative)");
+                // Loud and specific: name the degraded backend and the gap.
+                // (The pre-fix message said "fell back to CPU" even when a
+                // real GPU was the degraded target — and the worst case, CPU
+                // silently winning a budget an accelerator missed, warned not
+                // at all; see select.rs.)
+                eprintln!(
+                    "[accelrun] WARNING: no backend met the {}-byte budget; degraded to backend={} ({} bytes) — ACCEL_MEM_BYTES stays the requested hint",
+                    mem, acc.backend.as_env(), acc.mem_total
+                );
             }
             let cdi_dir = std::path::PathBuf::from("/tmp/accelrun-cdi");
             let path = cdi::write_cdi_spec(&acc, mem, &cdi_dir)
                 .map_err(|e| format!("CDI spec write failed: {}", e))?;
             println!("[accelrun] CDI spec (for --cdi mode): {}", path.display());
             if acc.unified_with_host {
-                if let Err(e) = sys::apply_memory_cap("default", mem) {
-                    eprintln!("[accelrun] cgroup cap skipped (expected w/o root): {}", e);
-                } else {
-                    println!("[accelrun] capped unified RAM at {} bytes", mem);
-                }
+                // Enforce-vs-hint asymmetry (docs/vision.md): unified backends
+                // get a real cap via the launcher's actual levers — docker
+                // --memory in direct mode (oci.rs), the CDI spec's
+                // cgroupRules in --cdi mode (cdi.rs). The old CLI-side
+                // cgroup write capped the CLI's own process; removed.
+                println!(
+                    "[accelrun] unified backend: budget enforced via docker --memory ({} bytes)",
+                    mem
+                );
             }
             // fault check after selection
             if sys::detect(sys::Fault::ProbeFalseNegative, acc.backend.as_env()) {
