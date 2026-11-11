@@ -97,3 +97,56 @@ a workload silently serving on CPU. All of it is distilled into the
   LICENSE-MIT + LICENSE-APACHE + Cargo.toml's `MIT OR Apache-2.0`
   expression; the Zenodo record description states the dual license.
   Restore the array if #2515 is ever fixed.
+
+## 2026-11 — WSL2 direct attach (dxg), toolkit-free
+
+Motivation: a WSL2 smoke run landed on the CPU backend (contract printed,
+exit 1 was gpu-smoke.py's own `die()` on dlopen — accelrun behaving as
+designed) because two probe assumptions break on WSL2: numbered
+`/dev/nvidia*` nodes never exist there (the GPU is the paravirt `/dev/dxg`
+node), and nvidia-smi lives at `/usr/lib/wsl/lib/` which non-Ubuntu distros
+leave off PATH, so the PATH-only `Command::new("nvidia-smi")` smi-fallback
+never fired. The run also exposed a wrong claim in oci.rs's `--gpus all`
+error path — "On WSL this is unavoidable (docker needs the toolkit)" —
+which is false: the toolkit's own WSL mode is just `/dev/dxg` +
+`/usr/lib/wsl/lib` + `LD_LIBRARY_PATH`, all of which accelrun can inject
+itself.
+
+- **Probe (nvidia.rs)**: new `smi()` helper tries `/usr/lib/wsl/lib/nvidia-smi`
+  first, then PATH. `detect()` keeps the bare-metal path untouched; when
+  numbered nodes are absent but `/dev/dxg` exists AND smi confirms an
+  NVIDIA GPU (dxg alone is vendor-neutral DirectCompute and proves
+  nothing), devices becomes `["/dev/dxg"]` → direct attach.
+  Driver-present-but-no-nodes-and-no-dxg (restricted namespaces) still
+  degrades to the `--gpus all` last resort exactly as before.
+- **Attach (oci.rs)**: the dxg node rides the existing generic `--device`
+  loop; the attach gains a WSL branch mirroring libnvidia-container's WSL
+  mode: `/usr/lib/wsl/lib` bind-mounted `:ro` at its identity path +
+  `-e LD_LIBRARY_PATH=/usr/lib/wsl/lib` + smi mounted to `/usr/bin` for
+  parity with the bare-metal path. The bare-metal argv sits unchanged in
+  the `else` branch. The corrected error text names the real remediations
+  (Windows driver → dxg appears; toolkit for `--gpus all`).
+- **Known caveats** (runbook WSL section + failure map): `docker -e` cannot
+  append, so an image-set `LD_LIBRARY_PATH` is overridden; Docker Desktop's
+  daemon lives in its own distro, so `--device /dev/dxg` and the wsl-lib
+  bind resolve in that VM's filesystem — the supported path is docker
+  native to the WSL distro; the driver must be the Windows-side one (a
+  Linux driver inside WSL is unsupported and breaks the wsl-lib mount).
+- **Verification status**: argv-verified on a synthetic dxg accelerator —
+  `nvidia_wsl_dry_run_argv_assembles` is this branch's only unit test
+  (main predates the test suite). NEVER run on WSL hardware. The patch was
+  developed on the amd_support-stacked tree, where the full 10-test suite
+  passed with it applied; this branch is the same patch re-authored
+  standalone (`git diff main wsl_patch`), re-built and argv-eyeballed
+  here. The select/sys suites do not exist on this branch — they belong
+  to the amd_support changeset.
+- **Branch note**: standalone feature branch off `main` (cf6fb66), parallel
+  to `amd_support`, so the AMD and WSL lines of work stay independent.
+  Merging both reproduces the stacked tree the patch was developed on —
+  that tree is the recorded, suite-tested resolution of the oci.rs
+  conflict between the two branches.
+- **No-`cc` dev-container recipe, second extension** (build infra, applies
+  repo-wide): the fakelib needs BOTH `libgcc_s.so.1` (runtime name — what
+  the earlier recipe recorded) AND `libgcc_s.so -> system libgcc_s.so.1`
+  (the LINKER name: lld resolves `-lgcc_s` against `libgcc_s.so`, which
+  is why a `.so.1`-only symlink fails the test build).

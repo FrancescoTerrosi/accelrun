@@ -183,74 +183,103 @@ pub fn launch(args: &RunArgs, acc: &Accelerator, mem_bytes: u64) -> Result<(), S
             cmd.arg("-e").arg(format!("{}={}", k, v));
         }
         // Toolkit-FREE GPU attach: raw device nodes + driver libraries bind-mounted.
-        // (--gpus all is only used as a last resort when no nodes are visible,
-        // e.g. WSL, and it does require the NVIDIA Container Toolkit.)
+        // (--gpus all is only a last resort when NO nodes are visible —
+        // restricted namespaces — and it does require the NVIDIA Container
+        // Toolkit. WSL2 hosts have their own toolkit-free path: the dxg
+        // branch below.)
         if !acc.devices.is_empty() {
             for d in &acc.devices {
                 cmd.arg("--device").arg(d);
             }
-            // nvidiactl / uvm usually live alongside the numbered nodes
-            for extra in ["/dev/nvidiactl", "/dev/nvidia-uvm", "/dev/nvidia-uvm-tools"] {
-                if std::path::Path::new(extra).exists() && !acc.devices.contains(&extra.to_string()) {
-                    cmd.arg("--device").arg(extra);
+            if acc.devices.iter().any(|d| d == "/dev/dxg") {
+                // WSL2 attach, toolkit-free — mirrors nvidia-container-
+                // toolkit's own WSL mode (libnvidia-container): the
+                // paravirt dxg node is the whole device story (injected
+                // by the generic --device loop above); the Windows
+                // driver ships its userspace (libcuda, NVML, PTX JIT,
+                // smi) as one directory, bind-mounted read-only at its
+                // WSL identity path, with LD_LIBRARY_PATH pointing the
+                // loader at it. Nothing else exists to inject: WSL has
+                // no nvidiactl/uvm nodes, no host /usr/lib64 driver
+                // globs, no /usr/bin smi of its own.
+                // NB: docker -e cannot append — an image that pre-sets
+                // LD_LIBRARY_PATH gets it overridden (runbook, WSL map).
+                cmd.arg("-v").arg("/usr/lib/wsl/lib:/usr/lib/wsl/lib:ro");
+                // smi parity with the bare-metal path: queryable at the
+                // usual /usr/bin path (glibc images only, as ever).
+                if std::path::Path::new("/usr/lib/wsl/lib/nvidia-smi").exists() {
+                    cmd.arg("-v").arg("/usr/lib/wsl/lib/nvidia-smi:/usr/bin/nvidia-smi:ro");
                 }
-            }
-            // Mount driver libs so the container's CUDA can talk to the host driver.
-            // Mirrors nvidia-container-cli's compute+utility set: ml (NVML), cuda
-            // (driver API), ptxjitcompiler/gpucomp/nvvm/nvjitlink/compiler (JIT +
-            // forward-compat pieces).
-            for libdir in ["/usr/lib/x86_64-linux-gnu", "/usr/lib64", "/lib/x86_64-linux-gnu"] {
-                for pat in [
-                    "libnvidia-ml.so*",
-                    "libcuda.so*",
-                    "libnvidia-gpucomp.so*",
-                    "libnvidia-ptxjitcompiler.so*",
-                    "libnvidia-nvvm.so*",
-                    "libnvjitlink.so*",
-                    "libnvidia-compiler.so*",
-                ] {
-                    for f in crate::probe::glob_dev(&format!("{}/{}", libdir, pat)) {
-                        cmd.arg("-v").arg(format!("{}:{}:ro", f, f));
-                        // Cross-distro loader paths: Debian/Ubuntu images do
-                        // NOT search /usr/lib64 (their dynamic linker uses
-                        // the multiarch dirs), so on a Fedora host the
-                        // identity mount is invisible to dlopen/ld.so inside
-                        // the container ("libcuda.so.1: cannot open shared
-                        // object file"). Mirror the lib into the multiarch dir
-                        // as a second read-only bind; Fedora-family images
-                        // keep finding it via the identity mount in
-                        // /usr/lib64.
-                        if libdir == "/usr/lib64" {
-                            if let Some(name) = f.rsplit('/').next() {
-                                if !name.is_empty() {
-                                    cmd.arg("-v").arg(format!(
-                                        "{}:/usr/lib/x86_64-linux-gnu/{}:ro",
-                                        f, name
-                                    ));
+                cmd.arg("-e").arg("LD_LIBRARY_PATH=/usr/lib/wsl/lib");
+            } else {
+                // nvidiactl / uvm usually live alongside the numbered nodes
+                for extra in ["/dev/nvidiactl", "/dev/nvidia-uvm", "/dev/nvidia-uvm-tools"] {
+                    if std::path::Path::new(extra).exists() && !acc.devices.contains(&extra.to_string()) {
+                        cmd.arg("--device").arg(extra);
+                    }
+                }
+                // Mount driver libs so the container's CUDA can talk to the host driver.
+                // Mirrors nvidia-container-cli's compute+utility set: ml (NVML), cuda
+                // (driver API), ptxjitcompiler/gpucomp/nvvm/nvjitlink/compiler (JIT +
+                // forward-compat pieces).
+                for libdir in ["/usr/lib/x86_64-linux-gnu", "/usr/lib64", "/lib/x86_64-linux-gnu"] {
+                    for pat in [
+                        "libnvidia-ml.so*",
+                        "libcuda.so*",
+                        "libnvidia-gpucomp.so*",
+                        "libnvidia-ptxjitcompiler.so*",
+                        "libnvidia-nvvm.so*",
+                        "libnvjitlink.so*",
+                        "libnvidia-compiler.so*",
+                    ] {
+                        for f in crate::probe::glob_dev(&format!("{}/{}", libdir, pat)) {
+                            cmd.arg("-v").arg(format!("{}:{}:ro", f, f));
+                            // Cross-distro loader paths: Debian/Ubuntu images do
+                            // NOT search /usr/lib64 (their dynamic linker uses
+                            // the multiarch dirs), so on a Fedora host the
+                            // identity mount is invisible to dlopen/ld.so inside
+                            // the container ("libcuda.so.1: cannot open shared
+                            // object file"). Mirror the lib into the multiarch dir
+                            // as a second read-only bind; Fedora-family images
+                            // keep finding it via the identity mount in
+                            // /usr/lib64.
+                            if libdir == "/usr/lib64" {
+                                if let Some(name) = f.rsplit('/').next() {
+                                    if !name.is_empty() {
+                                        cmd.arg("-v").arg(format!(
+                                            "{}:/usr/lib/x86_64-linux-gnu/{}:ro",
+                                            f, name
+                                        ));
+                                    }
                                 }
                             }
                         }
                     }
                 }
-            }
-            // nvidia-smi is driver userspace too (host-provided, glibc-linked):
-            // mount it so non-CUDA images can query the GPU. NB: it will not
-            // exec on musl images (alpine) — NVIDIA userspace needs glibc ld.so.
-            if std::path::Path::new("/usr/bin/nvidia-smi").exists() {
-                cmd.arg("-v").arg("/usr/bin/nvidia-smi:/usr/bin/nvidia-smi:ro");
+                // nvidia-smi is driver userspace too (host-provided, glibc-linked):
+                // mount it so non-CUDA images can query the GPU. NB: it will not
+                // exec on musl images (alpine) — NVIDIA userspace needs glibc ld.so.
+                if std::path::Path::new("/usr/bin/nvidia-smi").exists() {
+                    cmd.arg("-v").arg("/usr/bin/nvidia-smi:/usr/bin/nvidia-smi:ro");
+                }
             }
             cmd.arg("-e").arg("NVIDIA_VISIBLE_DEVICES=all")
                .arg("-e").arg("NVIDIA_DRIVER_CAPABILITIES=compute,utility");
         } else if acc.backend == crate::probe::Backend::Nvidia {
-            // No device nodes visible (WSL / restricted namespace): the ONLY
-            // docker path is --gpus all, which needs the toolkit.
+            // Driver present but neither numbered nodes nor /dev/dxg visible
+            // (a WSL2 host with a working driver takes the dxg direct path
+            // instead; landing here means a restricted namespace or a broken
+            // WSL driver setup): the only docker path left is --gpus all,
+            // which needs the toolkit.
             if nvidia_toolkit_present() {
                 cmd.arg("--gpus").arg("all");
             } else {
                 return Err(
-                    "no /dev/nvidia* nodes visible to accelrun and NVIDIA Container Toolkit not installed. \
-                     On WSL this is unavoidable (docker needs the toolkit); on bare metal check that the \
-                     nvidia driver loaded: `ls /dev/nvidia*`."
+                    "nvidia-smi lists a GPU but no /dev/nvidia* nodes and no /dev/dxg are visible, and \
+                     the NVIDIA Container Toolkit is not installed. On WSL install the Windows NVIDIA \
+                     driver (the distro then gets /dev/dxg + /usr/lib/wsl/lib); on bare metal check the \
+                     driver loaded: `ls /dev/nvidia*`. The --gpus all fallback needs the toolkit \
+                     (`nvidia-ctk --version`)."
                         .into(),
                 );
             }
@@ -276,4 +305,47 @@ pub fn launch(args: &RunArgs, acc: &Accelerator, mem_bytes: u64) -> Result<(), S
         return Err(format!("container exited with {}", status));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Synthetic WSL2 NVIDIA accelerator -> dry-run argv assembly: proves
+    /// the WSL attach argv builds without panicking. It has NEVER run on
+    /// WSL hardware (the author's WSL2 host owns the first gpu-smoke.py PASS
+    /// — runbook, WSL2 section). Eyeball with `cargo test nvidia_wsl --
+    /// --nocapture`: expects --device /dev/dxg, -v
+    /// /usr/lib/wsl/lib:/usr/lib/wsl/lib:ro, -e
+    /// LD_LIBRARY_PATH=/usr/lib/wsl/lib, NVIDIA_VISIBLE_DEVICES=all — and
+    /// NONE of the bare-metal artifacts (nvidiactl/uvm --device, /usr/lib64
+    /// lib globs, /usr/bin/nvidia-smi identity mount).
+    #[test]
+    fn nvidia_wsl_dry_run_argv_assembles() {
+        let acc = crate::probe::Accelerator {
+            backend: crate::probe::Backend::Nvidia,
+            name: "TEST WSL GPU".into(),
+            mem_total: 12 << 30,
+            mem_bandwidth_gbps: 1000.0,
+            devices: vec!["/dev/dxg".into()],
+            unified_with_host: false,
+            custom_accel_id: None,
+        };
+        let args = RunArgs {
+            mem: "12Gi".into(),
+            unified: false,
+            cdi: false,
+            dry_run: true,
+            volumes: vec![],
+            name: None,
+            network: None,
+            detach: false,
+            ports: vec![],
+            envs: vec![],
+            restart: None,
+            image: "python:3.12-slim".into(),
+            cmd: vec!["python3".into(), "-c".into(), "1".into()],
+        };
+        launch(&args, &acc, 12 << 30).expect("dry-run launch must assemble argv");
+    }
 }
