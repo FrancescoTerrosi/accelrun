@@ -51,7 +51,7 @@ Inspect while private — the GitHub-side render gate:
 
 - [ ] README lands as intended (quickstart copy-paste, tables, code blocks)
 - [ ] every Documentation link resolves (runbook / vision / decisions /
-      releasing / TODO)
+      releasing)
 - [ ] "Cite this repository" opens without a CITATION.cff validation warning
 - [ ] history shows the noreply author with the right avatar
 - [ ] description + topics set (they carry into public)
