@@ -10,7 +10,7 @@
 ## Foundational decisions
 
 - **Rust with zero external crates.** CLI parsing, JSON, a TOML subset, and
-  glob are hand-rolled: the release binary stays ≈460 KB and builds anywhere —
+  glob are hand-rolled: the release binary stays ≈506 KB and builds anywhere —
   including rootless containers with no C toolchain (the first dev
   environment had no system `cc`; the host-specific linker workaround stays
   out of the repo, see `.gitignore`).
@@ -161,12 +161,14 @@ reference implementation.
   accelerators-missing-budget (loud `degraded` warning naming backend and
   gap) → CPU. Unit tests pin each tier. The warning no longer claims "fell
   back to CPU" when the degraded target is a real GPU (the P0 mislabel).
-- **Unified-memory enforcement moved to the real levers.** `sys.rs`'s cgroup
+- **Unified-memory enforcement moved to the real lever.** `sys.rs`'s cgroup
   writer capped the *CLI's own process* (containers get cgroups from
   dockerd, so the cap never reached the workload) and printed a fictional
-  "capped unified RAM" success; removed. Direct mode enforces via docker
-  `--memory`, `--cdi` mode via the spec's `cgroupRules` (already correct in
-  `cdi.rs`).
+  "capped unified RAM" success; removed. Enforcement is a **host-RAM cap**
+  via docker `--memory`, applied in ALL modes and landing in the container's
+  cgroup v2 `memory.max`. CDI has no memory-limit field, so the emitted CDI
+  spec carries no cgroup rule (see cdi.rs); `--cdi` mode relies on the same
+  `docker --memory`.
 - **`docker --memory` is now scoped to unified backends only.** The old
   unconditional flag silently hard-capped container *host RAM* at the VRAM
   budget — `--mem 2Gi` on a GPU host was a 2-GiB-RAM container — and
@@ -243,3 +245,43 @@ itself.
   AND `libgcc_s.so -> system libgcc_s.so.1` (the LINKER name: lld resolves
   `-lgcc_s` against `libgcc_s.so`, which is why a `.so.1`-only symlink
   fails the test build). Recorded for the next bootstrap.
+
+## 2026-11 — CDI spec install path (--cdi made operational)
+
+Review of the vendor-neutral CDI path found the emitted spec carried a
+`cgroupRules` field that does not exist in the CDI schema (CDI's only cgroup
+field is `deviceCgroupRules`, a device-whitelist rwm field added in v1.2.0 —
+no memory controller). Removed it: the spec is now `env` + `deviceNodes`
+only, and unified-memory enforcement is `docker --memory` alone (applied in
+both modes, landing in the container's cgroup v2 `memory.max`). See
+cdi.rs/oci.rs and the model-conformance wording fixes.
+
+`--cdi` also only wrote the spec to `/tmp/accelrun-cdi`, which the daemon
+never scans, so `--device cdi:accel.local/gpu=gpu0` was unresolvable. Added
+`cdi::install_cdi_spec`: on `--cdi`, accelrun installs the spec into
+`/var/run/cdi` (fallback `/etc/cdi`) and fails loudly with remediation if
+neither is writable (typically root). A daemon reload may still be needed
+for Docker to pick up a newly-installed spec; the runbook/README now state
+this.
+
+Decision: `--cdi` stays **demonstrative/publication only** — the spec
+carries `env` + `deviceNodes`, not the driver-library mounts — so compute
+attach remains direct mode's job. `--dry-run --cdi` therefore previews the
+install without performing it.
+
+## 2026-11 — CDI attach hint (attach_mounts refactor)
+
+Implemented the `docs/cdi-mount-hint-plan.md` plan:
+- Extracted the backend driver-library mount computation out of `oci.rs`
+  into `oci::attach_mounts(acc) -> Vec<(host, container)>`; direct mode now
+  consumes it as `-v` args with no argv change.
+- `--cdi` prints the mount hint and writes a machine-readable sidecar
+  `/tmp/accelrun-cdi/mount-hints.txt` (non-dry-run only).
+- `clean.sh` now notes the daemon reload after CDI-spec removal and the
+  rootless/custom `cdi-spec-dirs` limitation.
+
+Verification status: `cargo test` 11/11 passes and `cargo build --release`
+succeeds (toolchain bootstrapped with rustup + the documented fakelib
+workaround). `--cdi --dry-run` verified side-effect-free; the non-root
+`--cdi` path returns the clean remediation error. The sudo-install sidecar
+write (plan step 4) is still pending on a root-capable host.

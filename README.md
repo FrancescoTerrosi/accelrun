@@ -2,7 +2,7 @@
 
 **Run GPU workloads in containers with no NVIDIA Container Toolkit, no runtime registration, and any Docker version.**
 
-`accelrun` is a single zero-dependency Rust binary (~460 KB) that probes your host, picks the best accelerator for a requested memory budget, and launches containers with the GPU passed through as raw device nodes plus bind-mounted driver libraries. Your workload stays portable across NVIDIA / AMD / Apple Metal / custom accelerators / CPU via a vendor-neutral environment contract (`ACCEL_*`) — and optionally as a vendor-neutral CDI device.
+`accelrun` is a single zero-dependency Rust binary (~506 KB) that probes your host, picks the best accelerator for a requested memory budget, and launches containers with the GPU passed through as raw device nodes plus bind-mounted driver libraries. Your workload stays portable across NVIDIA / AMD / Apple Metal / custom accelerators / CPU via a vendor-neutral environment contract (`ACCEL_*`) — and optionally as a vendor-neutral CDI device.
 
 ## Quickstart
 
@@ -49,7 +49,7 @@ The GPU is really in the container — verify with real CUDA compute (driver API
 
 If that prints `PASS`, you have PTX-JIT'd vector-add running in a container launched with zero toolkit involvement.
 
-**Status: production-verified end-to-end** on a bare-metal Fedora host (RTX 5070 Ti, driver 580 open kernel module, no NVIDIA Container Toolkit): the smoke test above plus a 14B LLM served at "100% GPU" per `ollama ps`, in an accelrun-launched container. AMD ROCm's toolkit-free attach path is fully implemented (kfd + renderD nodes, host ROCm userspace bind-mounts, `--group-add` node permissions — argv-verified on a synthetic device, see the [runbook](docs/runbook.md)) but not yet hardware-verified. WSL2's toolkit-free attach (`/dev/dxg` + the Windows driver's `/usr/lib/wsl/lib` — still no NVIDIA Container Toolkit) is likewise implemented and argv-verified on a synthetic device, hardware verification pending. Apple Metal and custom TOML probes are detected; NVIDIA remains the only backend verified end-to-end on hardware so far.
+**Status: production-verified end-to-end** on a bare-metal Fedora host (RTX 5070 Ti, driver 580 open kernel module, no NVIDIA Container Toolkit): the smoke test above plus a 14B LLM served at "100% GPU" per `ollama ps`, in an accelrun-launched container. AMD ROCm's toolkit-free attach path is fully implemented (kfd + renderD nodes, host ROCm userspace bind-mounts, `--group-add` node permissions — argv-verified on a synthetic device, see the [runbook](docs/runbook.md)) but not yet hardware-verified. WSL2's toolkit-free attach (`/dev/dxg` + the Windows driver's `/usr/lib/wsl/lib` — still no NVIDIA Container Toolkit) is likewise implemented and argv-verified on a synthetic device, hardware verification pending. Apple Metal and custom TOML probes are detected (Metal requires a macOS build — the shipped Linux binary never emits `metal`); NVIDIA remains the only backend verified end-to-end on hardware so far.
 
 ## What it is — and what it is not
 
@@ -66,7 +66,7 @@ If that prints `PASS`, you have PTX-JIT'd vector-add running in a container laun
 | Mode | When it engages | Requirements |
 |---|---|---|
 | **direct** (default) | bare-metal host with `/dev/nvidia*` nodes, or WSL2 (`/dev/dxg` + Windows driver) | none — works on any Docker |
-| **cdi** (`--cdi` flag) | fleet tooling wants vendor-neutral specs | Docker ≥ 25, spec in the daemon CDI dir |
+| **cdi** (`--cdi` flag) | vendor-neutral spec publication/demonstration (not a compute attach path — direct mode does that) | Docker ≥ 25 to resolve it; spec auto-installed to `/var/run/cdi` (fallback `/etc/cdi`) — may need a daemon reload |
 | `--gpus all` (automatic last resort) | driver works but neither numbered nodes nor `/dev/dxg` are visible (restricted namespaces) | NVIDIA Container Toolkit — accelrun errors with remediation if absent |
 
 Direct mode injects, with no toolkit involved:
@@ -98,7 +98,7 @@ What the container sees, regardless of the backend that served it:
 | `ACCEL_UNIFIED` | `true` if memory is unified with host RAM (APU, Apple, CPU) |
 | `ACCEL_DEVICE` | primary device node (empty when backend has none) |
 
-Optionally, the same resource is published as a vendor-neutral CDI device — `--device cdi:accel.local/gpu=gpu0` — with the spec written under `/tmp/accelrun-cdi` for inspection and installation into the daemon's CDI directory.
+Optionally, the same resource is published as a vendor-neutral CDI device — `--device cdi:accel.local/gpu=gpu0` — with the spec written under `/tmp/accelrun-cdi` for inspection and, in `--cdi` mode, installed into the daemon's CDI directory (`/var/run/cdi`, falling back to `/etc/cdi`; a daemon reload may be needed). `--cdi` is **publication/demonstration only**: the spec carries the `ACCEL_*` env contract + device nodes, not the driver-library mounts, so compute attach still uses direct mode. To make that gap explicit, `--cdi` also prints the backend's driver-library mount list and writes `/tmp/accelrun-cdi/mount-hints.txt`.
 
 ## CLI reference
 

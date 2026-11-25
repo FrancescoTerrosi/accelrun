@@ -9,7 +9,7 @@ open kernel module, no NVIDIA Container Toolkit, ollama workload).
 | Mode | When | Requirements |
 |---|---|---|
 | **direct** (default) | bare-metal `/dev/nvidia*` nodes, or WSL2 (`/dev/dxg` + Windows driver) | none: any docker |
-| **cdi** (`--cdi`) | fleet tooling wants vendor-neutral specs | docker ≥ 25, spec in the daemon CDI dir |
+| **cdi** (`--cdi`) | vendor-neutral spec publication/demonstration (not a compute attach path — direct mode does that) | docker ≥ 25 to resolve it; spec auto-installed to `/var/run/cdi` (fallback `/etc/cdi`) — may need a daemon reload |
 | `--gpus all` (last resort) | driver works but neither numbered nodes nor `/dev/dxg` visible (restricted namespaces) | NVIDIA Container Toolkit registered in the daemon |
 | (non-accelrun) host-native service | no GPU in containers at all | host systemd service + `host-gateway` networking |
 
@@ -181,9 +181,11 @@ AMD-specific verification ladder (each step must PASS once in its life):
 
 APU note: unified memory (Ryzen iGPU / Strix Halo class) is detected via
 PCI class `0x0380xx` or the VRAM carve-out signature and reported as
-`ACCEL_UNIFIED=true` — the budget is then hard-enforced via docker
-`--memory` (direct mode) or the CDI spec's `cgroupRules` (`--cdi` mode);
-discrete VRAM stays hint-only (see `docs/vision.md`).
+`ACCEL_UNIFIED=true` — the budget is then enforced as a **host-RAM cap**
+via docker `--memory` (all modes; lands in the container's cgroup v2
+`memory.max`). CDI has no memory-limit field, so the emitted CDI spec
+carries no cgroup rule. Discrete VRAM stays hint-only (see
+`docs/vision.md`).
 
 ### Hardware session via cloud rental (no AMD GPU needed on premises)
 

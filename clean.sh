@@ -24,9 +24,9 @@ Inventory (what the project leaves behind, and where):
               + named volumes mounted by accelrun containers;
               anonymous volumes are only reported (never auto-pruned)
   images      accelrun:* (+ base images rust:*/debian:bookworm-slim via --all)
-  filesystem  /tmp/accelrun-cdi (CDI spec written on EVERY `run`),
-              CDI specs registering accel.local/gpu in /etc/cdi or
-              /var/run/cdi (--cdi mode), /sys/fs/cgroup/accelrun
+  filesystem  /tmp/accelrun-cdi (CDI spec on every `run`; mount-hints
+              sidecar in --cdi mode), CDI specs registering accel.local/gpu
+              in /etc/cdi or /var/run/cdi (--cdi mode), /sys/fs/cgroup/accelrun
               (legacy: cgroup cap written by pre-2026-11 builds only)
   via --all   ~/.config/accelrun/ (custom probes.toml — user content),
               accelrun binaries found on $PATH (verified by ELF magic +
@@ -332,13 +332,17 @@ else
   if ! $DRY_RUN && $cdi_found && ! $is_root; then
     echo "  note: if a removal above failed you may need: sudo $0"
   fi
+  if $cdi_found; then
+    echo '  note: reload docker after removal so the daemon deregisters accel.local/gpu'
+    echo '        (rootless / custom cdi-spec-dirs are not scanned by this script)'
+  fi
 
   echo
   echo "── host filesystem: cgroup v2 memory cap (legacy) ──"
   # /sys/fs/cgroup/accelrun: created ONLY by pre-2026-11 builds (the old
   # CLI-side cap wrote memory.max = budget and moved the accelrun process
-  # itself into the cgroup; current builds enforce via docker --memory /
-  # CDI cgroupRules instead and write nothing here). Removal needs root and
+  # itself into the cgroup; current builds enforce via docker --memory only
+  # and write nothing here). Removal needs root and
   # an empty dir (the kernel refuses rmdir while members/children remain).
   if [ -d /sys/fs/cgroup/accelrun ]; then
     if $DRY_RUN; then

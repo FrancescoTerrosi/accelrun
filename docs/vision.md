@@ -20,14 +20,16 @@ and injects devices / env vars / memory caps via direct argv injection
 1. Abstract at the **resource/claim level** (CDI + OCI + cgroups), NOT by emulating
    CUDA. Workloads stay portable via Triton / MLIR / SYCL / WebGPU / ONNX-RT.
 2. **Unified memory** (Apple UMA, AMD APU, CXL pools) is a first-class backend:
-   the budget is *enforced* with the launcher's real levers — docker
-   `--memory` (direct mode) or the CDI spec's `cgroupRules` (`--cdi` mode);
-   both land in the container's cgroup v2 `memory.max`.
+   the budget is *enforced* as a **host-RAM cap** with the launcher's real
+   lever — docker `--memory`, applied in all modes and landing in the
+   container's cgroup v2 `memory.max`. CDI has no memory-limit field, so the
+   emitted CDI spec carries no cgroup rule; `--cdi` mode uses the same
+   `docker --memory`.
 3. Discrete VRAM on consumer NVIDIA cannot be hard-capped without MIG — expose
    the budget as an app-level contract (`ACCEL_MEM_BYTES`) instead. Documented gap.
-4. Safety/RAMS layer: FMEA-style fault registry with
-   detection hooks and mitigations (backend misdetection, host OOM on unified RAM,
-   numeric drift across backends, mid-run device crash).
+4. Safety/RAMS layer: FMEA-style fault registry with one live detection
+   hook (ProbeFalseNegative) and mitigations (backend misdetection, host OOM
+   on unified RAM, numeric drift across backends, mid-run device crash).
 
 ## Architecture
 ```
@@ -43,8 +45,9 @@ accelrun run --mem 16Gi --image X -- cmd      (probe → select → inject)
            (spec emitted every run — the orchestrator integration surface)
         ▼
 Backend: nvidia | amd | metal | custom | cpu
-        (+ hard docker --memory cap on unified backends
-         (cgroupRules in --cdi mode); FMEA detection hooks throughout)
+        (+ hard docker --memory host-RAM cap on unified backends,
+         all modes; FMEA fault registry +
+         one live hook, ProbeFalseNegative)
 ```
 
 ## Open gaps in SotA this project addresses

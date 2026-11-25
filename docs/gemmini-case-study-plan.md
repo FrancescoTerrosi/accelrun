@@ -45,7 +45,9 @@ Why Gemmini specifically:
 - **C3 — contract neutrality**: a non-NVIDIA workload consumes the same
   `ACCEL_*` contract inside an accelrun-launched container.
 - **C4 — vendor-neutral publication**: the resource is emitted as CDI
-  `accel.local/gpu=gpu0` with `cgroupRules` — schedulable next to NVIDIA.
+  `accel.local/gpu=gpu0` (env + deviceNodes) — schedulable next to NVIDIA.
+  Memory enforcement rides the same `docker --memory` as direct mode, not
+  the spec: CDI has no memory-limit field.
 
 Explicitly NOT claimed (write these down or reviewers will):
 
@@ -91,7 +93,7 @@ EOF
 ./accelrun run --mem 1Gi --image python:3.12-slim -- \
     python3 -c "import os; print(os.environ['ACCEL_BACKEND'], os.environ['ACCEL_MEM_BYTES'])"
 docker inspect <c> --format '{{json .HostConfig.Devices}}'
-cat /tmp/accelrun-cdi/accel.json                   # cgroupRules present (unified=true)
+cat /tmp/accelrun-cdi/accel.json                   # env + deviceNodes only (no memory rule)
 ```
 
 What Tier 0 already catches: TOML-subset parser bugs, glob-class behavior
@@ -160,7 +162,7 @@ Verification ladder (runbook-style, one PASS each):
 6. In-container: `gemmini-smoke.c` matmul PASS (compute really happened —
    record the systolic-array path, not just "didn't crash").
 7. In-container: OOM-kill at budget → `ENFORCED` (C2, first time ever).
-8. CDI spec inspection: env + `cgroupRules` present (C4).
+8. CDI spec inspection: env + deviceNodes present; no memory rule (C4).
 
 Success criteria: every step passes **at least once in its life** (the
 five-bug-chain lesson); every bug found becomes a numbered entry in the
@@ -191,7 +193,8 @@ strongest form of C1: exotic hardware registered with zero code change.
   (end-to-end), custom+unified-cap (after Tier 2), Tier 0 = contract-only
 - `docs/sota-gaps.md`: ARE-update — Gaps 1–3 gain a *demonstration*, not
   just document analysis
-- `TODO.md`: close the medium-term case-study item
+- close the medium-term case-study item (the old `TODO.md` tracker is gone;
+  items now live in the session queue / decisions log)
 
 ## 5. Risks and honest caveats
 

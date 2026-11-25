@@ -4,9 +4,11 @@
 //! — removed 2026-11. It moved the *accelrun CLI's own PID* into a cgroup,
 //! but containers are placed in cgroups by dockerd, so the cap never reached
 //! the workload (and its "capped unified RAM" success message was fiction).
-//! The real enforcement levers are the launcher-issued `docker --memory`
-//! (direct mode, oci.rs) and the CDI spec's `cgroupRules` (`--cdi` mode,
-//! cdi.rs). See docs/decisions.md, model-conformance fixes.
+//! The real enforcement lever is the launcher-issued `docker --memory`
+//! (oci.rs), applied in BOTH direct and `--cdi` modes and landing in the
+//! container's cgroup v2 `memory.max`. CDI has no memory-limit field, so
+//! the emitted spec carries no cgroup rule (see cdi.rs). See
+//! docs/decisions.md, model-conformance fixes.
 
 use std::path::Path;
 use std::process::Command;

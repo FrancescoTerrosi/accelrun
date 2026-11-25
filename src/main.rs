@@ -23,7 +23,7 @@ fn all_probes() -> Vec<Box<dyn Probe>> {
 }
 
 pub(crate) fn all_accels() -> Vec<probe::Accelerator> {
-    all_probes().into_iter().filter_map(|p| p.detect()).collect()
+    all_probes().into_iter().flat_map(|p| p.detect_all()).collect()
 }
 
 fn main() {
@@ -52,7 +52,7 @@ fn run(argv: &[String]) -> Result<i32, String> {
     match sub {
         "probe" => {
             for p in all_probes() {
-                if let Some(acc) = p.detect() {
+                for acc in p.detect_all() {
                     println!(
                         "{:<8} {:<28} mem={:>14} BW={:>7.0} GB/s unified={} devices={:?}",
                         acc.backend.as_env(),
@@ -103,13 +103,15 @@ fn run(argv: &[String]) -> Result<i32, String> {
             let cdi_dir = std::path::PathBuf::from("/tmp/accelrun-cdi");
             let path = cdi::write_cdi_spec(&acc, mem, &cdi_dir)
                 .map_err(|e| format!("CDI spec write failed: {}", e))?;
-            println!("[accelrun] CDI spec (for --cdi mode): {}", path.display());
+            println!("[accelrun] CDI spec: {}", path.display());
             if acc.unified_with_host {
                 // Enforce-vs-hint asymmetry (docs/vision.md): unified backends
-                // get a real cap via the launcher's actual levers — docker
-                // --memory in direct mode (oci.rs), the CDI spec's
-                // cgroupRules in --cdi mode (cdi.rs). The old CLI-side
-                // cgroup write capped the CLI's own process; removed.
+                // get a host-RAM cap via the launcher's real lever — docker
+                // --memory (oci.rs), applied in BOTH direct and --cdi modes
+                // and landing in the container's cgroup v2 memory.max. CDI has
+                // no memory-limit field, so the emitted spec carries no cgroup
+                // rule (see cdi.rs). The old CLI-side cgroup write capped the
+                // CLI's own process; removed.
                 println!(
                     "[accelrun] unified backend: budget enforced via docker --memory ({} bytes)",
                     mem
@@ -124,7 +126,52 @@ fn run(argv: &[String]) -> Result<i32, String> {
                 );
             }
             if args.cdi {
-                println!("[accelrun] mode=cdi (requires Docker>=25 + spec in daemon CDI dir)");
+                let mounts = oci::attach_mounts(&acc);
+                let header = if args.dry_run {
+                    format!(
+                        "[accelrun] mode=cdi (dry-run): backend={} — vendor-neutral publication only (direct mode is the compute attach path)",
+                        acc.backend.as_env()
+                    )
+                } else {
+                    format!(
+                        "[accelrun] mode=cdi: backend={} — vendor-neutral publication only (direct mode is the compute attach path)",
+                        acc.backend.as_env()
+                    )
+                };
+                println!("{}", header);
+                if mounts.is_empty() {
+                    println!("[accelrun] attach hint: no host driver mounts (image-borne userspace)");
+                } else {
+                    println!("[accelrun] attach hint (mounts a consumer must add for compute):");
+                    for (host, container) in &mounts {
+                        println!("  {} -> {}", host, container);
+                    }
+                }
+                if args.dry_run {
+                    println!(
+                        "[accelrun] mode=cdi (dry-run): would install accel.local/gpu to /var/run/cdi (fallback /etc/cdi)"
+                    );
+                } else {
+                    let installed = cdi::install_cdi_spec(&acc, mem)?;
+                    println!(
+                        "[accelrun] mode=cdi: spec installed at {} (Docker>=25; may need a daemon reload)",
+                        installed.display()
+                    );
+                    let manifest = {
+                        let mut s = mounts
+                            .iter()
+                            .map(|(h, c)| format!("{}\t{}", h, c))
+                            .collect::<Vec<_>>()
+                            .join("\n");
+                        if !s.is_empty() {
+                            s.push('\n');
+                        }
+                        s
+                    };
+                    if let Err(e) = std::fs::write("/tmp/accelrun-cdi/mount-hints.txt", manifest) {
+                        eprintln!("[accelrun] warning: could not write mount-hints sidecar: {}", e);
+                    }
+                }
             } else {
                 println!("[accelrun] mode=direct (env + --device injection)");
             }

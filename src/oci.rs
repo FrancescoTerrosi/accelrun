@@ -27,9 +27,11 @@ pub fn parse_mem(s: &str) -> Result<u64, String> {
     } else {
         (s, 1)
     };
-    num.parse::<u64>()
-        .map(|n| n * mult)
-        .map_err(|_| format!("bad --mem value: {}", s))
+    let n = num
+        .parse::<u64>()
+        .map_err(|_| format!("bad --mem value: {}", s))?;
+    n.checked_mul(mult)
+        .ok_or_else(|| format!("bad --mem value: {}", s))
 }
 
 /// Minimal parser for: run --mem 16Gi [--unified] [--name N] [--network NET]
@@ -139,15 +141,141 @@ fn nvidia_toolkit_present() -> bool {
         || std::path::Path::new("/usr/bin/nvidia-container-runtime").exists()
 }
 
-/// Bind-mount `src` -> `dest` read-only, skipping duplicate destinations
-/// (docker refuses two mounts at the same container path — reachable when
-/// the same lib exists in more than one host libdir).
-fn bind_ro(cmd: &mut Command, src: &str, dest: &str, seen: &mut Vec<String>) {
-    if seen.iter().any(|d| d == dest) {
+/// Push `host` -> `container` into `mounts`, deduplicating by container path
+/// (docker refuses two mounts at the same container path — reachable when the
+/// same lib exists in more than one host libdir).
+fn push_mount(mounts: &mut Vec<(String, String)>, seen: &mut Vec<String>, host: &str, container: &str) {
+    if seen.iter().any(|d| d == container) {
         return;
     }
-    seen.push(dest.to_string());
-    cmd.arg("-v").arg(format!("{}:{}:ro", src, dest));
+    seen.push(container.to_string());
+    mounts.push((host.to_string(), container.to_string()));
+}
+
+/// Host -> container bind mounts for the selected backend's driver userspace,
+/// in the exact order direct mode emits them as `-v` args. Deduplicated by
+/// container path. `launch` turns these into `-v host:container:ro`; `--cdi`
+/// mode prints them as a hint of what a consumer must mount for compute.
+///
+/// - NVIDIA bare-metal: driver API + NVML + PTX-JIT/compiler libs, mirrored
+///   into the Debian multiarch dir (Fedora/merge-usr hosts), plus nvidia-smi.
+/// - NVIDIA WSL2 (`/dev/dxg`): the Windows driver's `/usr/lib/wsl/lib` + smi.
+/// - AMD: ROCm userspace (hsa-runtime64/hsakmt/amdhip64/comgr, drm, elf, numa)
+///   + host rocminfo/amd-smi/rocm-smi.
+/// - CPU, Metal, custom: empty (image-borne or nothing to inject).
+pub fn attach_mounts(acc: &Accelerator) -> Vec<(String, String)> {
+    let mut mounts: Vec<(String, String)> = vec![];
+    let mut seen: Vec<String> = vec![];
+
+    match acc.backend {
+        crate::probe::Backend::Nvidia => {
+            if acc.devices.iter().any(|d| d == "/dev/dxg") {
+                push_mount(&mut mounts, &mut seen, "/usr/lib/wsl/lib", "/usr/lib/wsl/lib");
+                if std::path::Path::new("/usr/lib/wsl/lib/nvidia-smi").exists() {
+                    push_mount(&mut mounts, &mut seen, "/usr/lib/wsl/lib/nvidia-smi", "/usr/bin/nvidia-smi");
+                }
+            } else {
+                // Merge-usr hosts (Ubuntu/Debian: /lib -> /usr/lib) would mount
+                // the same lib twice via different paths — skip libdirs that
+                // canonicalize to an already-scanned one.
+                let mut dirs_seen: Vec<String> = vec![];
+                for libdir in ["/usr/lib/x86_64-linux-gnu", "/usr/lib64", "/lib/x86_64-linux-gnu"] {
+                    let canon = std::fs::canonicalize(libdir)
+                        .map(|c| c.to_string_lossy().into_owned())
+                        .unwrap_or_else(|_| libdir.to_string());
+                    if dirs_seen.contains(&canon) {
+                        continue;
+                    }
+                    dirs_seen.push(canon);
+                    for pat in [
+                        "libnvidia-ml.so*",
+                        "libcuda.so*",
+                        "libnvidia-gpucomp.so*",
+                        "libnvidia-ptxjitcompiler.so*",
+                        "libnvidia-nvvm.so*",
+                        "libnvjitlink.so*",
+                        "libnvidia-compiler.so*",
+                    ] {
+                        for f in crate::probe::glob_dev(&format!("{}/{}", libdir, pat)) {
+                            push_mount(&mut mounts, &mut seen, &f, &f);
+                            // Cross-distro loader path: Debian/Ubuntu images do
+                            // not search /usr/lib64, so mirror libs into the
+                            // multiarch dir.
+                            if libdir == "/usr/lib64" {
+                                if let Some(name) = f.rsplit('/').next() {
+                                    if !name.is_empty() {
+                                        push_mount(&mut mounts, &mut seen, &f, &format!("/usr/lib/x86_64-linux-gnu/{}", name));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                if std::path::Path::new("/usr/bin/nvidia-smi").exists() {
+                    push_mount(&mut mounts, &mut seen, "/usr/bin/nvidia-smi", "/usr/bin/nvidia-smi");
+                }
+            }
+        }
+        crate::probe::Backend::Amd => {
+            let mut dirs_seen: Vec<String> = vec![];
+            for libdir in [
+                "/opt/rocm/lib",
+                "/usr/lib/x86_64-linux-gnu",
+                "/usr/lib64",
+                "/lib/x86_64-linux-gnu",
+            ] {
+                let canon = std::fs::canonicalize(libdir)
+                    .map(|c| c.to_string_lossy().into_owned())
+                    .unwrap_or_else(|_| libdir.to_string());
+                if dirs_seen.contains(&canon) {
+                    continue;
+                }
+                dirs_seen.push(canon);
+                for pat in [
+                    "libhsa-runtime64.so*",
+                    "libhsakmt.so*",
+                    "libamdhip64.so*",
+                    "libamd_comgr.so*",
+                    "libdrm_amdgpu.so*",
+                    "libdrm.so*",
+                    "libelf.so*",
+                    "libnuma.so*",
+                ] {
+                    for f in crate::probe::glob_dev(&format!("{}/{}", libdir, pat)) {
+                        push_mount(&mut mounts, &mut seen, &f, &f);
+                        // Mirror into the multiarch dir (same cross-distro fix
+                        // as NVIDIA): identity binds in /opt/rocm or /usr/lib64
+                        // are invisible to a Debian-family loader.
+                        if libdir != "/usr/lib/x86_64-linux-gnu" {
+                            if let Some(name) = f.rsplit('/').next() {
+                                if !name.is_empty() {
+                                    push_mount(&mut mounts, &mut seen, &f, &format!("/usr/lib/x86_64-linux-gnu/{}", name));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            for tool in [
+                "/opt/rocm/bin/rocminfo",
+                "/usr/bin/rocminfo",
+                "/opt/rocm/bin/amd-smi",
+                "/usr/bin/amd-smi",
+                "/opt/rocm/bin/rocm-smi",
+                "/usr/bin/rocm-smi",
+            ] {
+                if std::path::Path::new(tool).exists() {
+                    if let Some(name) = tool.rsplit('/').next() {
+                        if !name.is_empty() {
+                            push_mount(&mut mounts, &mut seen, tool, &format!("/usr/bin/{}", name));
+                        }
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+    mounts
 }
 
 pub fn launch(args: &RunArgs, acc: &Accelerator, mem_bytes: u64) -> Result<(), String> {
@@ -224,6 +352,7 @@ pub fn launch(args: &RunArgs, acc: &Accelerator, mem_bytes: u64) -> Result<(), S
             for gid in gids {
                 cmd.arg("--group-add").arg(gid.to_string());
             }
+            let mounts = attach_mounts(acc);
             match acc.backend {
                 crate::probe::Backend::Nvidia => {
                     if acc.devices.iter().any(|d| d == "/dev/dxg") {
@@ -239,11 +368,8 @@ pub fn launch(args: &RunArgs, acc: &Accelerator, mem_bytes: u64) -> Result<(), S
                         // globs, no /usr/bin smi of its own.
                         // NB: docker -e cannot append — an image that pre-sets
                         // LD_LIBRARY_PATH gets it overridden (runbook, WSL map).
-                        cmd.arg("-v").arg("/usr/lib/wsl/lib:/usr/lib/wsl/lib:ro");
-                        // smi parity with the bare-metal path: queryable at the
-                        // usual /usr/bin path (glibc images only, as ever).
-                        if std::path::Path::new("/usr/lib/wsl/lib/nvidia-smi").exists() {
-                            cmd.arg("-v").arg("/usr/lib/wsl/lib/nvidia-smi:/usr/bin/nvidia-smi:ro");
+                        for (host, container) in &mounts {
+                            cmd.arg("-v").arg(format!("{}:{}:ro", host, container));
                         }
                         cmd.arg("-e").arg("LD_LIBRARY_PATH=/usr/lib/wsl/lib");
                     } else {
@@ -255,49 +381,8 @@ pub fn launch(args: &RunArgs, acc: &Accelerator, mem_bytes: u64) -> Result<(), S
                                 cmd.arg("--device").arg(extra);
                             }
                         }
-                        // Mount driver libs so the container's CUDA can talk to the host driver.
-                        // Mirrors nvidia-container-cli's compute+utility set: ml (NVML), cuda
-                        // (driver API), ptxjitcompiler/gpucomp/nvvm/nvjitlink/compiler (JIT +
-                        // forward-compat pieces).
-                        for libdir in ["/usr/lib/x86_64-linux-gnu", "/usr/lib64", "/lib/x86_64-linux-gnu"] {
-                            for pat in [
-                                "libnvidia-ml.so*",
-                                "libcuda.so*",
-                                "libnvidia-gpucomp.so*",
-                                "libnvidia-ptxjitcompiler.so*",
-                                "libnvidia-nvvm.so*",
-                                "libnvjitlink.so*",
-                                "libnvidia-compiler.so*",
-                            ] {
-                                for f in crate::probe::glob_dev(&format!("{}/{}", libdir, pat)) {
-                                    cmd.arg("-v").arg(format!("{}:{}:ro", f, f));
-                                    // Cross-distro loader paths: Debian/Ubuntu images do
-                                    // NOT search /usr/lib64 (their dynamic linker uses
-                                    // the multiarch dirs), so on a Fedora host the
-                                    // identity mount is invisible to dlopen/ld.so inside
-                                    // the container ("libcuda.so.1: cannot open shared
-                                    // object file"). Mirror the lib into the multiarch dir
-                                    // as a second read-only bind; Fedora-family images
-                                    // keep finding it via the identity mount in
-                                    // /usr/lib64.
-                                    if libdir == "/usr/lib64" {
-                                        if let Some(name) = f.rsplit('/').next() {
-                                            if !name.is_empty() {
-                                                cmd.arg("-v").arg(format!(
-                                                    "{}:/usr/lib/x86_64-linux-gnu/{}:ro",
-                                                    f, name
-                                                ));
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        // nvidia-smi is driver userspace too (host-provided, glibc-linked):
-                        // mount it so non-CUDA images can query the GPU. NB: it will not
-                        // exec on musl images (alpine) — NVIDIA userspace needs glibc ld.so.
-                        if std::path::Path::new("/usr/bin/nvidia-smi").exists() {
-                            cmd.arg("-v").arg("/usr/bin/nvidia-smi:/usr/bin/nvidia-smi:ro");
+                        for (host, container) in &mounts {
+                            cmd.arg("-v").arg(format!("{}:{}:ro", host, container));
                         }
                     }
                     cmd.arg("-e").arg("NVIDIA_VISIBLE_DEVICES=all")
@@ -323,76 +408,8 @@ pub fn launch(args: &RunArgs, acc: &Accelerator, mem_bytes: u64) -> Result<(), S
                     // these mounts SHADOWING its image copies — keep host ROCm
                     // >= image ROCm or strip the mounts from a --dry-run argv
                     // (docs/runbook.md, AMD failure map).
-                    let mut seen: Vec<String> = vec![];
-                    // Merge-usr hosts (Ubuntu/Debian: /lib -> /usr/lib) would
-                    // mount the same lib twice via different paths — skip
-                    // libdirs that canonicalize to an already-scanned one.
-                    let mut dirs_seen: Vec<String> = vec![];
-                    for libdir in [
-                        "/opt/rocm/lib",
-                        "/usr/lib/x86_64-linux-gnu",
-                        "/usr/lib64",
-                        "/lib/x86_64-linux-gnu",
-                    ] {
-                        let canon = std::fs::canonicalize(libdir)
-                            .map(|c| c.to_string_lossy().into_owned())
-                            .unwrap_or_else(|_| libdir.to_string());
-                        if dirs_seen.contains(&canon) {
-                            continue;
-                        }
-                        dirs_seen.push(canon);
-                        for pat in [
-                            "libhsa-runtime64.so*",
-                            "libhsakmt.so*",
-                            "libamdhip64.so*",
-                            "libamd_comgr.so*",
-                            "libdrm_amdgpu.so*",
-                            "libdrm.so*",
-                            "libelf.so*",
-                            "libnuma.so*",
-                        ] {
-                            for f in crate::probe::glob_dev(&format!("{}/{}", libdir, pat)) {
-                                bind_ro(&mut cmd, &f, &f, &mut seen);
-                                // Cross-distro loader path (same fix as the
-                                // NVIDIA libpath bug): an identity bind in
-                                // /usr/lib64 or /opt/rocm is invisible to a
-                                // Debian-family image's dynamic linker —
-                                // mirror into the multiarch dir.
-                                if libdir != "/usr/lib/x86_64-linux-gnu" {
-                                    if let Some(name) = f.rsplit('/').next() {
-                                        if !name.is_empty() {
-                                            bind_ro(
-                                                &mut cmd,
-                                                &f,
-                                                &format!("/usr/lib/x86_64-linux-gnu/{}", name),
-                                                &mut seen,
-                                            );
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    // Operator tools from the host (compiled ones run as-is;
-                    // rocm-smi AND amd-smi are python scripts in recent ROCm
-                    // and may need their module tree inside the image — the
-                    // definitive attach check is rocminfo / tests/amd-smoke.py,
-                    // mirroring nvidia-smi's role).
-                    for tool in [
-                        "/opt/rocm/bin/rocminfo",
-                        "/usr/bin/rocminfo",
-                        "/opt/rocm/bin/amd-smi",
-                        "/usr/bin/amd-smi",
-                        "/opt/rocm/bin/rocm-smi",
-                        "/usr/bin/rocm-smi",
-                    ] {
-                        if std::path::Path::new(tool).exists() {
-                            if let Some(name) = tool.rsplit('/').next() {
-                                if !name.is_empty() {
-                                    bind_ro(&mut cmd, tool, &format!("/usr/bin/{}", name), &mut seen);
-                                }
-                            }
-                        }
+                    for (host, container) in &mounts {
+                        cmd.arg("-v").arg(format!("{}:{}:ro", host, container));
                     }
                 }
                 // Custom accelerators: raw nodes only — their userspace is
@@ -430,7 +447,11 @@ pub fn launch(args: &RunArgs, acc: &Accelerator, mem_bytes: u64) -> Result<(), S
     //   --memory, so the container's host RAM is no longer silently capped
     //   at the VRAM budget (the old unconditional flag made `--mem 2Gi` on
     //   a GPU host a 2-GiB-RAM container); ACCEL_MEM_BYTES carries the hint.
-    // The --cdi path carries the same asymmetry via cgroupRules (cdi.rs).
+    // This --memory is applied in BOTH modes on purpose: it is the only
+    // enforcement lever for unified backends, and CDI has no memory-limit
+    // field (see cdi.rs) — so --cdi mode relies on this same docker --memory,
+    // not on anything in the emitted spec. The cap lands in the container's
+    // cgroup v2 memory.max.
     if acc.unified_with_host {
         cmd.arg("--memory").arg(mem_bytes.to_string());
     }
@@ -474,7 +495,6 @@ mod tests {
             mem_bandwidth_gbps: 1000.0,
             devices: vec!["/dev/kfd".into(), "/dev/dri/renderD128".into()],
             unified_with_host: false,
-            custom_accel_id: None,
         };
         let args = RunArgs {
             mem: "16Gi".into(),
@@ -512,7 +532,6 @@ mod tests {
             mem_bandwidth_gbps: 1000.0,
             devices: vec!["/dev/dxg".into()],
             unified_with_host: false,
-            custom_accel_id: None,
         };
         let args = RunArgs {
             mem: "12Gi".into(),
