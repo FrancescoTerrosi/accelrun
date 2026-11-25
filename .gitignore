@@ -14,8 +14,3 @@ tests/__pycache__/
 # docs/decisions.md, "Foundational decisions"). Committing it would break
 # everyone else's builds; the workaround is documented there instead.
 /.cargo/
-
-# --- Local-only archive ------------------------------------------------------
-# Pre-promotion working files (e.g. the full original decisions log) —
-# deliberately unpublished.
-/archive/

@@ -26,9 +26,8 @@ Why Gemmini specifically:
 - **It is literally the `unified_with_host` case.** Scratchpad + DMA from
   shared SoC DRAM (through L2): no hardware memory boundary → the budget is
   enforceable, not hinted. This would be the **first end-to-end exercise of
-  the enforce-vs-hint asymmetry** — i.e. a live demonstration of Gap 2/3's
-  "unified half", which the position paper currently supports with document
-  analysis only.
+  the enforce-vs-hint asymmetry** — a live demonstration of Gap 2/3's
+  "unified half", currently supported only by document analysis.
 - **It exposes a real boundary of the abstraction.** Mainstream Gemmini is
   RoCC/ISA-attached — there is **no `/dev` node**, so the current custom
   probe cannot even detect it. Finding, patching, and documenting that

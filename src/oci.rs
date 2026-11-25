@@ -330,15 +330,9 @@ pub fn launch(args: &RunArgs, acc: &Accelerator, mem_bytes: u64) -> Result<(), S
             for d in &acc.devices {
                 cmd.arg("--device").arg(d);
             }
-            // Device-node group permissions: docker's --device only relaxes
-            // the *cgroup* side of access — the node's file permissions still
-            // win (AMD nodes are 0660 root:video / root:render; NVIDIA's are
-            // 0666). Pass each node's owning gid as a supplemental group so
-            // non-root container users can open them (--group-add is AMD's
-            // own documented fix; gids are stat'd from the nodes themselves
-            // because the render gid is not standardized across distros).
-            // Inert when nodes are 0666 root:root, so the verified NVIDIA argv
-            // is unchanged on 0666 hosts.
+            // docker's --device relaxes only the cgroup side; file perms still
+            // win (AMD nodes are 0660 root:video/render; NVIDIA's 0666). Pass
+            // each node's owning gid via --group-add (stat'd, not hardcoded).
             let mut gids: Vec<u32> = vec![];
             for d in &acc.devices {
                 if let Ok(md) = std::fs::metadata(d) {
@@ -356,18 +350,11 @@ pub fn launch(args: &RunArgs, acc: &Accelerator, mem_bytes: u64) -> Result<(), S
             match acc.backend {
                 crate::probe::Backend::Nvidia => {
                     if acc.devices.iter().any(|d| d == "/dev/dxg") {
-                        // WSL2 attach, toolkit-free — mirrors nvidia-container-
-                        // toolkit's own WSL mode (libnvidia-container): the
-                        // paravirt dxg node is the whole device story (injected
-                        // by the generic --device loop above); the Windows
-                        // driver ships its userspace (libcuda, NVML, PTX JIT,
-                        // smi) as one directory, bind-mounted read-only at its
-                        // WSL identity path, with LD_LIBRARY_PATH pointing the
-                        // loader at it. Nothing else exists to inject: WSL has
-                        // no nvidiactl/uvm nodes, no host /usr/lib64 driver
-                        // globs, no /usr/bin smi of its own.
-                        // NB: docker -e cannot append — an image that pre-sets
-                        // LD_LIBRARY_PATH gets it overridden (runbook, WSL map).
+                        // WSL2 attach — mirrors nvidia-container-toolkit's WSL
+                        // mode: dxg is the whole device story; the Windows
+                        // driver ships its userspace under /usr/lib/wsl/lib,
+                        // mounted :ro with LD_LIBRARY_PATH pointing at it.
+                        // NB: docker -e overrides an image's LD_LIBRARY_PATH.
                         for (host, container) in &mounts {
                             cmd.arg("-v").arg(format!("{}:{}:ro", host, container));
                         }
@@ -389,24 +376,11 @@ pub fn launch(args: &RunArgs, acc: &Accelerator, mem_bytes: u64) -> Result<(), S
                        .arg("-e").arg("NVIDIA_DRIVER_CAPABILITIES=compute,utility");
                 }
                 crate::probe::Backend::Amd => {
-                    // ROCm attach, toolkit-free — the direct mirror of the
-                    // NVIDIA pattern: nodes are injected above; now the host
-                    // ROCm userspace is bind-mounted read-only. The KFD
-                    // userspace must come from the HOST (it is coupled to the
-                    // host kernel's KFD ioctls), exactly like libcuda is
-                    // coupled to the NVIDIA driver. The set is the AMD analog
-                    // of nvidia-container-cli's compute+utility set:
-                    //   libhsa-runtime64/libhsakmt — the KFD userspace
-                    //                               (the "libcuda" analog)
-                    //   libamdhip64             — HIP runtime ("cudart"-thin)
-                    //   libamd_comgr            — code-object JIT ("ptxjit")
-                    //   libdrm_amdgpu/libdrm    — render-node GEM path
-                    //   libelf/libnuma          — .so deps slim images lack
-                    // AMD's own container runtime mounts the whole host ROCm
-                    // tree; this subset is strictly smaller. NB: an image that
-                    // already carries a ROCm stack (rocm/*, rocm/pytorch) gets
-                    // these mounts SHADOWING its image copies — keep host ROCm
-                    // >= image ROCm or strip the mounts from a --dry-run argv
+                    // ROCm attach — the host KFD userspace is coupled to the
+                    // host kernel's KFD ioctls (like libcuda to the NVIDIA
+                    // driver), so it must be bind-mounted from the host. An
+                    // image with its own ROCm stack gets these mounts
+                    // shadowing it — keep host ROCm >= image ROCm
                     // (docs/runbook.md, AMD failure map).
                     for (host, container) in &mounts {
                         cmd.arg("-v").arg(format!("{}:{}:ro", host, container));

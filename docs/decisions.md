@@ -4,8 +4,7 @@
 > documentation, and artifacts were produced with LLM-based coding agents
 > under the author's direction. All design decisions, review, and hardware
 > verification are human work — including catching the bugs the generated
-> code carried (the five-bug chain below). Every entry is a verified record,
-> kept as the project's technical memory.
+> code carried (the five-bug chain below). Every entry is a verified record.
 
 ## Foundational decisions
 
@@ -84,8 +83,7 @@ a workload silently serving on CPU. All of it is distilled into the
   projects and is promoted to a standalone, public, dual-licensed
   (MIT OR Apache-2.0) repository now that it is production-verified
   end-to-end.
-- The session-by-session worklog was distilled into the sections above; the
-  full original stays in the author's local archive (gitignored).
+- The session-by-session worklog was distilled into the sections above.
 - Operator-facing knowledge lives in the [runbook](runbook.md); design
   rationale in [vision.md](vision.md).
 - **Citation metadata: single license string for Zenodo.** Zenodo's GitHub

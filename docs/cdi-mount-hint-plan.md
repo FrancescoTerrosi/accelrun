@@ -1,43 +1,26 @@
 # CDI attach hint — plan
 
-> **Status: DRAFT — proposed, not yet implemented.** This file is the plan.
-> Results land only after the verification steps at the bottom pass. Same
-> honesty rules as the rest of the repo: the hint is *documentation*, not a
-> claim that `--cdi` is a working compute-attach path.
-
-**Status update (2026-11): implemented.** `cargo test` 11/11 and
-`cargo build --release` pass; `--cdi --dry-run` is side-effect-free and the
-non-root `--cdi` path errors cleanly. Only plan step 4 (sudo install +
-sidecar write on a writable daemon dir) remains to be exercised on a
-root-capable host.
+> **Status: implemented (2026-11).** `cargo test` 11/11 and
+> `cargo build --release` pass; `--cdi --dry-run` is side-effect-free; the
+> non-root `--cdi` path errors cleanly. Only step 4 (sudo install + sidecar
+> write on a writable daemon dir) remains to be exercised on a root-capable
+> host. The hint is *documentation*, not a claim that `--cdi` runs compute.
 
 ## 1. Why
 
-`--cdi` is now publication/demonstration only (see the 2026-11 decisions.md
-entry): it emits and installs a vendor-neutral `accel.local/gpu` spec carrying
-the `ACCEL_*` env contract + device nodes. It deliberately does **not** carry
-the backend-specific driver-library mounts that direct mode assembles in
-`oci.rs`.
-
-The gap that leaves for a consumer is: "this spec publishes the resource, but
-what would I actually have to mount to make compute work?" A consumer (an
-orchestrator, or a reviewer verifying Gap 1) currently has to reverse-engineer
-that answer from direct mode.
-
-The added value is to make accelrun *say* it: publish the spec, and alongside
-it print/write the exact backend-specific mount set a consumer would need. That
-keeps `--cdi` publication-only (no behavior change to the spec) while removing
-the guesswork.
+`--cdi` publishes a vendor-neutral `accel.local/gpu` spec (the `ACCEL_*`
+contract + device nodes) but deliberately omits the backend-specific
+driver-library mounts that direct mode assembles. The hint makes accelrun
+*state* those mounts instead of leaving a consumer to reverse-engineer them.
 
 ## 2. Context / decision
 
 - `--cdi` stays **publication/demonstration only**; direct mode remains the
   compute-attach path.
-- The CDI spec stays `env` + `deviceNodes`; it does **not** grow a `mounts`
-  field in this change. (That is the deeper, idiomatic end-state if we ever
-  want `--cdi` to be fully consumable — explicitly out of scope here.)
-- accelrun already computes the exact mount set per backend in `oci.rs`. This
-  plan factors that computation out and reuses it for the hint.
+- The CDI spec stays `env` + `deviceNodes`; it does not grow a `mounts`
+  field. (That is the deeper end-state, out of scope here.)
+- accelrun already computes the mount set per backend in `oci.rs`; this plan
+  factors it out and reuses it for the hint.
 
 ## 3. Changes
 

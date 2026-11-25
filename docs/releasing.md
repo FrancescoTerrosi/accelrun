@@ -1,8 +1,6 @@
 # Publishing checklist — pre-push / push / post-push
 
 Maintainer operations guide for publishing and releasing accelrun.
-Everything here is safe to be public: it documents *how* the project is
-published, which is part of its reproducibility story.
 
 ---
 
@@ -21,7 +19,7 @@ git grep -n "<owner>" $(git rev-list --all) -- ':!docs/releasing.md'   # must pr
 
 # the ignore set is intact — these must stay out of the public repo
 git status --porcelain --ignored | grep '^!!'
-#   -> .cargo/  accelrun  archive/  target/
+#   -> .cargo/  accelrun  target/
 
 # licenses + citation metadata
 grep Copyright LICENSE-MIT                # (c) 2026 Francesco Terrosi
@@ -65,27 +63,19 @@ Set while private (carries over on the flip):
   contributors appear; pointless while solo)
 
 Fix anything found, commit, push. Then flip: Settings → General →
-Danger Zone → **Change repository visibility → Make public**. Why this
-order and not straight-to-public, and not stay-private-longer: private→
-public loses nothing (commit dates carry provenance and were set at commit
-time, not push time), but Zenodo only syncs **public** repositories and
-the public timestamp is itself provenance protection — an inspection
-afternoon, not a holding pattern.
+Danger Zone → **Change repository visibility → Make public**. Private→
+public loses nothing, but Zenodo only syncs **public** repositories, and the
+public timestamp is provenance protection.
 
 ## 3. Post-push — release machinery
 
 ### 3a. What Zenodo is, and why this repo uses it
 
-[Zenodo](https://zenodo.org) is an open repository for research outputs,
-operated by CERN on behalf of the European Commission (OpenAIRE). For this
-project the relevant feature is the **GitHub integration**: every tag pushed
-to GitHub is automatically archived as a versioned snapshot with a
-**permanent DOI**, free of charge. That turns a release into a citable
-scholarly object — papers can cite `accelrun v0.1.0` by DOI, and the DOI's
-landing page always points back at the GitHub release. One project gets two
-identifiers: a *concept DOI* (cites "accelrun" across all versions, use this
-in papers) and one DOI per version. GitHub itself hosts code but issues no
-DOIs; Zenodo is the missing citation layer.
+[Zenodo](https://zenodo.org) is an open research-output repository. Its
+**GitHub integration** archives every tagged release as a versioned
+snapshot with a **permanent DOI**, free of charge: a *concept DOI* cites
+"accelrun" across all versions, and one DOI per version points back at the
+GitHub release.
 
 Setup (one time):
 

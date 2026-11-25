@@ -6,7 +6,7 @@
 
 ## Quickstart
 
-Requirements: a Linux host with **Docker** and a **working GPU driver** (`nvidia-smi` OK on the host — on WSL2 the *Windows* driver provides this inside the distro). accelrun does not install drivers, runtimes, or toolkits — that is the point. No GPU? You get graceful CPU fallback instead.
+Requirements: a Linux host with **Docker** and a **working GPU driver** (`nvidia-smi` OK on the host — on WSL2 the *Windows* driver provides this inside the distro). accelrun does not install drivers, runtimes, or toolkits. No GPU? You get graceful CPU fallback instead.
 
 Build the binary (no Rust toolchain needed):
 
@@ -98,7 +98,7 @@ What the container sees, regardless of the backend that served it:
 | `ACCEL_UNIFIED` | `true` if memory is unified with host RAM (APU, Apple, CPU) |
 | `ACCEL_DEVICE` | primary device node (empty when backend has none) |
 
-Optionally, the same resource is published as a vendor-neutral CDI device — `--device cdi:accel.local/gpu=gpu0` — with the spec written under `/tmp/accelrun-cdi` for inspection and, in `--cdi` mode, installed into the daemon's CDI directory (`/var/run/cdi`, falling back to `/etc/cdi`; a daemon reload may be needed). `--cdi` is **publication/demonstration only**: the spec carries the `ACCEL_*` env contract + device nodes, not the driver-library mounts, so compute attach still uses direct mode. To make that gap explicit, `--cdi` also prints the backend's driver-library mount list and writes `/tmp/accelrun-cdi/mount-hints.txt`.
+Optionally, the same resource is published as a vendor-neutral CDI device — `--device cdi:accel.local/gpu=gpu0` — with the spec written under `/tmp/accelrun-cdi` for inspection and, in `--cdi` mode, installed into the daemon's CDI directory (`/var/run/cdi`, falling back to `/etc/cdi`; a daemon reload may be needed). `--cdi` is **publication/demonstration only**: the spec carries the `ACCEL_*` env contract + device nodes, not the driver-library mounts, so compute attach still uses direct mode. `--cdi` also prints the backend's driver-library mount list and writes `/tmp/accelrun-cdi/mount-hints.txt`.
 
 ## CLI reference
 
