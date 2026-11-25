@@ -76,7 +76,6 @@ impl Probe for NvidiaProbe {
             mem_bandwidth_gbps: 1000.0,
             devices,
             unified_with_host: false,
-            custom_accel_id: None,
         })
     }
 }

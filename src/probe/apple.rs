@@ -32,7 +32,6 @@ impl Probe for AppleProbe {
             mem_bandwidth_gbps: 800.0, // M-series UMA class
             devices: vec![],
             unified_with_host: true,
-            custom_accel_id: None,
         })
     }
 }

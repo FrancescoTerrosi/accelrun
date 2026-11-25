@@ -53,25 +53,75 @@ fn parse_probes(text: &str) -> Vec<CustomProbe> {
     out
 }
 
+impl CustomProbes {
+    /// All custom accelerators whose device globs currently match something
+    /// under /dev. One `Accelerator` per matching `[[probe]]` entry.
+    fn accels(&self) -> Vec<Accelerator> {
+        let home = match std::env::var_os("HOME") {
+            Some(h) => h,
+            None => return vec![],
+        };
+        let path = std::path::Path::new(&home).join(".config/accelrun/probes.toml");
+        let text = match std::fs::read_to_string(path) {
+            Ok(t) => t,
+            Err(_) => return vec![],
+        };
+        parse_probes(&text)
+            .into_iter()
+            .filter_map(|p| {
+                let nodes = glob_dev(&p.device_glob);
+                if nodes.is_empty() {
+                    return None;
+                }
+                Some(Accelerator {
+                    backend: Backend::Custom,
+                    name: p.id.clone(),
+                    mem_total: p.mem_gib * 1024 * 1024 * 1024,
+                    mem_bandwidth_gbps: 500.0,
+                    devices: nodes,
+                    unified_with_host: p.unified,
+                })
+            })
+            .collect()
+    }
+}
+
 impl Probe for CustomProbes {
     fn detect(&self) -> Option<Accelerator> {
-        let home = std::env::var_os("HOME")?;
-        let path = std::path::Path::new(&home).join(".config/accelrun/probes.toml");
-        let text = std::fs::read_to_string(path).ok()?;
-        parse_probes(&text).into_iter().find_map(|p| {
-            let nodes = glob_dev(&p.device_glob);
-            if nodes.is_empty() {
-                return None;
-            }
-            Some(Accelerator {
-                backend: Backend::Custom,
-                name: p.id.clone(),
-                mem_total: p.mem_gib * 1024 * 1024 * 1024,
-                mem_bandwidth_gbps: 500.0,
-                devices: nodes,
-                unified_with_host: p.unified,
-                custom_accel_id: Some(p.id),
-            })
-        })
+        self.accels().into_iter().next()
+    }
+
+    fn detect_all(&self) -> Vec<Accelerator> {
+        self.accels()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_multiple_probe_entries() {
+        let text = r#"
+[[probe]]
+id = "tenstorrent"
+device_glob = "/dev/tenstorrent/*"
+mem_gib = 16
+unified = false
+
+[[probe]]
+id = "cxl-pool"
+device_glob = "/dev/cxl/*"
+mem_gib = 64
+unified = true
+"#;
+        let ps = parse_probes(text);
+        assert_eq!(ps.len(), 2);
+        assert_eq!(ps[0].id, "tenstorrent");
+        assert_eq!(ps[0].mem_gib, 16);
+        assert!(!ps[0].unified);
+        assert_eq!(ps[1].id, "cxl-pool");
+        assert_eq!(ps[1].mem_gib, 64);
+        assert!(ps[1].unified);
     }
 }

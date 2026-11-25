@@ -40,11 +40,17 @@ pub struct Accelerator {
     pub devices: Vec<String>,
     /// true on Apple UMA / AMD APU / CXL: GPU memory IS host RAM.
     pub unified_with_host: bool,
-    pub custom_accel_id: Option<String>,
 }
 
 pub trait Probe {
     fn detect(&self) -> Option<Accelerator>;
+
+    /// Every accelerator this probe can surface. Defaults to the single
+    /// `detect()` result; multi-device probes (e.g. the custom TOML probes)
+    /// override it to emit one accelerator per matching entry.
+    fn detect_all(&self) -> Vec<Accelerator> {
+        self.detect().into_iter().collect()
+    }
 }
 
 /// Environment contract injected into the container. The workload reads

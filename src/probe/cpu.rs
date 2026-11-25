@@ -24,7 +24,6 @@ impl Probe for CpuProbe {
             mem_bandwidth_gbps: 50.0, // DDR5-class
             devices: vec![],
             unified_with_host: true,
-            custom_accel_id: None,
         })
     }
 }

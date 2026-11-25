@@ -89,7 +89,6 @@ mod tests {
             mem_bandwidth_gbps: bw,
             devices: vec![],
             unified_with_host: unified,
-            custom_accel_id: None,
         }
     }
 

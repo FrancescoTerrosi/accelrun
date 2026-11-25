@@ -155,7 +155,6 @@ impl Probe for AmdProbe {
             mem_bandwidth_gbps: if unified { 256.0 } else { 1000.0 },
             devices,
             unified_with_host: unified,
-            custom_accel_id: None,
         })
     }
 }
