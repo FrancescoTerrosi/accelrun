@@ -20,3 +20,6 @@ tests/__pycache__/
 # docs/decisions.md, "Foundational decisions"). Committing it would break
 # everyone else's builds; the workaround is documented there instead.
 /.cargo/
+
+# --- Confidential working notes (never committed or published) ---------------
+/TODO.md
