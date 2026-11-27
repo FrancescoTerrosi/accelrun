@@ -1,6 +1,6 @@
 [package]
 name = "accelrun"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Francesco Terrosi"]
 edition = "2021"
 description = "Portable accelerator resource abstraction for containers (CDI + cgroups + backend probing). Zero-dependency."

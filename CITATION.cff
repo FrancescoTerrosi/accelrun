@@ -2,9 +2,9 @@
 cff-version: 1.2.0
 message: "If you use accelrun, please cite it using these metadata."
 title: accelrun
-version: 0.1.0
-# keep date-released in sync with the actual v0.1.0 tag date
-date-released: "2026-11-05"
+version: 0.1.1
+# keep date-released in sync with the actual tag date (set when v0.1.1 is tagged)
+date-released: "2026-11-27"
 authors:
   - family-names: Terrosi
     given-names: Francesco
