@@ -2,14 +2,18 @@
 
 Maintainer operations guide for publishing and releasing accelrun.
 
+> **v0.1.0 has shipped.** §2 (private→public flip) and §3a (Zenodo setup) are
+> one-time steps, already done. For a repeat release (e.g. v0.1.1): §1 → §3b →
+> §3c → §3d.
+
 ---
 
 ## 1. Pre-push — verify the local repo
 
 ```bash
-# clean tree, single root commit on main, correct author
+# clean tree, correct author
 git status --porcelain                    # must print nothing
-git log --oneline                         # one commit: "Initial public import"
+git log --oneline -5                      # recent commits
 git log -1 --pretty='%an <%ae>'
 #   -> Francesco Terrosi <33395865+FrancescoTerrosi@users.noreply.github.com>
 
@@ -19,7 +23,8 @@ git grep -n "<owner>" $(git rev-list --all) -- ':!docs/releasing.md'   # must pr
 
 # the ignore set is intact — these must stay out of the public repo
 git status --porcelain --ignored | grep '^!!'
-#   -> .cargo/  accelrun  target/
+#   -> .cargo/  accelrun  accelrun-v*  target/
+#   (SHA256SUMS is NOT ignored — it is committed as the trusted checksum anchor)
 
 # licenses + citation metadata
 grep Copyright LICENSE-MIT                # (c) 2026 Francesco Terrosi
@@ -95,12 +100,12 @@ CFF carries `license: MIT` and the Zenodo record description must state
 "Dual-licensed under MIT OR Apache-2.0; both license texts are in the
 archive." Watch #2515 and restore the array if it is ever fixed.
 
-### 3b. Tag the first release
+### 3b. Tag the release
 
 ```bash
 # annotated tag (add -s instead of -a for a GPG-signed tag once a key exists)
-git tag -a v0.1.0 -m "accelrun 0.1.0"
-git push origin v0.1.0
+git tag -a v0.1.1 -m "accelrun 0.1.1"
+git push origin v0.1.1
 ```
 
 Publishing the release for this tag is the trigger: Zenodo archives the
@@ -110,16 +115,24 @@ Record the concept DOI in the README citation section afterwards.
 ### 3c. GitHub Release with verified binaries
 
 ```bash
-# build the release binary (no Rust needed)
-docker build -t accelrun:latest .
-docker create --name ar accelrun:latest
-docker cp ar:/usr/local/bin/accelrun ./accelrun-v0.1.0-x86_64
-docker rm ar
-sha256sum accelrun-v0.1.0-x86_64 > SHA256SUMS
+# build + verify the release binary and its checksum (no Rust needed)
+./build.sh --release v0.1.1
+#   -> accelrun-v0.1.1-x86_64   (verified ELF + ACCEL_* signature + probe smoke)
+#   -> SHA256SUMS               (checksum appended; commit it with the release)
+
+# the checksum record is committed, so anchor it before tagging:
+git add SHA256SUMS && git commit -m "release: v0.1.1 checksums"
 ```
 
-GitHub → Releases → *Draft a new release* → choose tag `v0.1.0` → add release
-notes → attach **both** `accelrun-v0.1.0-x86_64` and `SHA256SUMS`.
+> The committed `SHA256SUMS` record **begins at v0.1.1**. v0.1.0 shipped
+> before checksum-anchoring existed, so it has no committed checksum (and its
+> release binary was published as an unversioned `accelrun` asset, so there is
+> nothing clean to backfill). Future releases append one line each.
+
+GitHub → Releases → *Draft a new release* → choose tag `v0.1.1` → add release
+notes → attach the `accelrun-v0.1.1-x86_64` binary (and a copy of
+`SHA256SUMS` for convenience). The committed `SHA256SUMS` — not the
+release-page copy — is the trust anchor third parties verify against.
 
 Publish **only after** the assets are attached: Zenodo snapshots the
 release at publish time — binaries added to an already-published release
@@ -131,9 +144,7 @@ re-publish the release).
 ```bash
 git clone https://github.com/FrancescoTerrosi/accelrun.git /tmp/ar-test
 cd /tmp/ar-test
-docker build -t accelrun:latest .
-docker create --name ar accelrun:latest \
-  && docker cp ar:/usr/local/bin/accelrun . && docker rm ar
+./build.sh                              # build + verify ./accelrun
 ./accelrun probe                       # backends + diagnostics listed
 # then the README Quickstart commands, ending with tests/gpu-smoke.py on the
 # GPU host — PASS is the release gate

@@ -8,17 +8,16 @@
 
 Requirements: a Linux host with **Docker** and a **working GPU driver** (`nvidia-smi` OK on the host — on WSL2 the *Windows* driver provides this inside the distro). accelrun does not install drivers, runtimes, or toolkits. No GPU? You get graceful CPU fallback instead.
 
-Build the binary (no Rust toolchain needed):
+Build the binary (no Rust toolchain needed — only a running Docker daemon):
 
 ```bash
 git clone https://github.com/FrancescoTerrosi/accelrun.git && cd accelrun
-docker build -t accelrun:latest .
-docker create --name ar accelrun:latest \
-  && docker cp ar:/usr/local/bin/accelrun . && docker rm ar
-chmod +x accelrun
+./build.sh                 # builds the image, extracts + verifies ./accelrun
 ```
 
-Or with Rust installed: `cargo build --release` (binary at `target/release/accelrun`).
+`build.sh --release v0.1.1` also emits a versioned binary + `SHA256SUMS` for a
+GitHub release. Or with Rust installed: `cargo build --release` (binary at
+`target/release/accelrun`).
 
 See what your host has:
 
