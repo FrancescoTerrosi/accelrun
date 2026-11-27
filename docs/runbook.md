@@ -9,7 +9,11 @@ open kernel module, no NVIDIA Container Toolkit, ollama workload).
 | Mode | When | Requirements |
 |---|---|---|
 | **direct** (default) | bare-metal `/dev/nvidia*` nodes, or WSL2 (`/dev/dxg` + Windows driver) | none: any docker |
+<<<<<<< HEAD
 | **cdi** (`--cdi`) | vendor-neutral spec publication/demonstration (not a compute attach path — direct mode does that) | docker ≥ 25 to resolve it; spec auto-installed to `/var/run/cdi` (fallback `/etc/cdi`) — may need a daemon reload |
+=======
+| **cdi** (`--cdi`) | fleet tooling wants vendor-neutral specs | docker ≥ 25, spec in the daemon CDI dir |
+>>>>>>> origin/main
 | `--gpus all` (last resort) | driver works but neither numbered nodes nor `/dev/dxg` visible (restricted namespaces) | NVIDIA Container Toolkit registered in the daemon |
 | (non-accelrun) host-native service | no GPU in containers at all | host systemd service + `host-gateway` networking |
 
@@ -20,12 +24,15 @@ loader paths), host `/usr/bin/nvidia-smi`, and the env contract (`ACCEL_*`).
 On WSL2 the same direct mode takes the WSL shape (`/dev/dxg` +
 `/usr/lib/wsl/lib`) — see
 [WSL2 attach](#wsl2-attach-implemented-hardware-verification-pending).
+<<<<<<< HEAD
 
 For AMD the same direct-mode philosophy applies (details and ladder in the
 [AMD ROCm attach](#amd-rocm-attach-implemented-hardware-verification-pending)
 section): `/dev/kfd` + `/dev/dri/renderD*` nodes, `--group-add` for the
 nodes' groups, the host ROCm userspace bind-mounted and mirrored, host
 `rocminfo`/`amd-smi`/`rocm-smi`, and the same `ACCEL_*` contract.
+=======
+>>>>>>> origin/main
 
 ## Command reference
 
@@ -136,6 +143,7 @@ WSL verification ladder (in the distro):
    `LD_LIBRARY_PATH`.
 5. `gpu-smoke.py` (README recipe) — the definitive verdict.
 
+<<<<<<< HEAD
 ## AMD ROCm attach (implemented; hardware verification pending)
 
 Same direct-mode philosophy as NVIDIA, no AMD Container Runtime Toolkit:
@@ -256,6 +264,22 @@ its silicon yet: no AMD GPU session, no WSL2 host session).
 | **[wsl]** in-container `dlopen("libcuda.so.1")` fails | wsl-lib mount or `LD_LIBRARY_PATH` missing from the argv; or the image pre-set `LD_LIBRARY_PATH` and the attach overrode it; or (Docker Desktop) the daemon resolved the bind in its own VM | dry-run must show `-v /usr/lib/wsl/lib:...` + `-e LD_LIBRARY_PATH=...`; use docker native to the distro |
 | **[wsl]** cuInit / device count fails though dxg is injected | old Windows driver, or the daemon could not stat `/dev/dxg` | WSL ladder steps 2–4 above |
 | **[nvidia]** exit 127, "nvidia-smi: not found" on alpine | musl cannot exec the host glibc binary | never use alpine/musl for NVIDIA userspace; `python:3.12-slim` (same applies to ROCm userspace) |
+=======
+## Failure map
+
+Unmarked lines are bugs we actually hit; lines marked **[wsl]** are
+*hypotheses* from the 2026-11 code session — the WSL2 hardware session
+confirms or retires them (the attach path has never run on WSL silicon).
+
+| Symptom | Root cause | Fix |
+|---|---|---|
+| in-container nvidia-smi: "No devices were found" | numbered `/dev/nvidia[0-9]*` not injected (glob class parser bug; or WSL-like host with only control nodes) | inspect `HostConfig.Devices`; fixed parser; WSL hosts → direct dxg attach (WSL2 section above) |
+| `dlopen("libcuda.so.1")` fails in a Debian-family image (Fedora host) | identity bind of `/usr/lib64` invisible to the multiarch loader | libs mirrored into `/usr/lib/x86_64-linux-gnu` — keep that in any future lib logic |
+| exit 127, "nvidia-smi: not found" on alpine | musl cannot exec the host glibc binary | never use alpine/musl for NVIDIA userspace; `python:3.12-slim` |
+| **[wsl]** probe prints `cpu` despite a GPU on the Windows side | PATH-only nvidia-smi lookup missed `/usr/lib/wsl/lib` (non-Ubuntu distros keep it off PATH) — fixed 2026-11-08: the probe tries both — or no Windows driver, so no `/dev/dxg` at all | install the NVIDIA driver **on Windows**; `accelrun probe` diagnostics name both smi paths it tries |
+| **[wsl]** in-container `dlopen("libcuda.so.1")` fails | wsl-lib mount or `LD_LIBRARY_PATH` missing from the argv; or the image pre-set `LD_LIBRARY_PATH` and the attach overrode it; or (Docker Desktop) the daemon resolved the bind in its own VM | dry-run must show `-v /usr/lib/wsl/lib:...` + `-e LD_LIBRARY_PATH=...`; use docker native to the distro |
+| **[wsl]** cuInit / device count fails though dxg is injected | old Windows driver, or the daemon could not stat `/dev/dxg` | WSL ladder steps 2–4 above |
+>>>>>>> origin/main
 | "unknown command 'X' for 'Y'" | image ENTRYPOINT prefixes the container command | pass just the subcommand (ollama: `serve`) or use `exec` |
 | container name / port conflicts on relaunch | with `-d` there is no `--rm`: failed containers persist | `docker rm -f <name>` before relaunching |
 | `cuMemGetInfo` → 201 with a healthy context, on host AND container, user AND root | legacy unversioned v1 symbol: driver 580 returns `CUDA_ERROR_INVALID_CONTEXT` from it even on a healthy machine | always call `*_v2` (`cuMemGetInfo_v2`, `cuMemAlloc_v2`, `cuMemcpy*_v2`, `cuMemFree_v2`) |
@@ -304,6 +328,7 @@ runs global docker prunes (build cache is left to `docker system df -v` + you).
 - no `--entrypoint` passthrough (one-shot commands in ENTRYPOINT images)
 - no hard VRAM cap (hint only; consumer cards have no MIG)
 - single-node launcher; the CDI spec is the k8s integration surface
+<<<<<<< HEAD
 - Alpine/musl unsupported for NVIDIA userspace (and for the same reason,
   ROCm userspace — glibc images only)
 - AMD: no `--security-opt` passthrough (seccomp=unconfined sometimes wanted
@@ -315,3 +340,8 @@ runs global docker prunes (build cache is left to `docker system df -v` + you).
 - WSL2 attach path is implemented but **not hardware-verified** (TODO
   short term) — everything above marked [wsl] is a hypothesis until that
   session
+=======
+- Alpine/musl unsupported for NVIDIA userspace
+- WSL2 attach path is implemented but **not hardware-verified** — everything
+  above marked [wsl] is a hypothesis until the WSL session
+>>>>>>> origin/main

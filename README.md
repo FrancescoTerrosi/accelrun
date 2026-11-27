@@ -6,7 +6,11 @@
 
 ## Quickstart
 
+<<<<<<< HEAD
 Requirements: a Linux host with **Docker** and a **working GPU driver** (`nvidia-smi` OK on the host — on WSL2 the *Windows* driver provides this inside the distro). accelrun does not install drivers, runtimes, or toolkits. No GPU? You get graceful CPU fallback instead.
+=======
+Requirements: a Linux host with **Docker** and a **working GPU driver** (`nvidia-smi` OK on the host — on WSL2 the *Windows* driver provides this inside the distro). accelrun does not install drivers, runtimes, or toolkits — that is the point. No GPU? You get graceful CPU fallback instead.
+>>>>>>> origin/main
 
 Build the binary (no Rust toolchain needed — only a running Docker daemon):
 
@@ -48,7 +52,11 @@ The GPU is really in the container — verify with real CUDA compute (driver API
 
 If that prints `PASS`, you have PTX-JIT'd vector-add running in a container launched with zero toolkit involvement.
 
+<<<<<<< HEAD
 **Status: production-verified end-to-end** on a bare-metal Fedora host (RTX 5070 Ti, driver 580 open kernel module, no NVIDIA Container Toolkit): the smoke test above plus a 14B LLM served at "100% GPU" per `ollama ps`, in an accelrun-launched container. AMD ROCm's toolkit-free attach path is fully implemented (kfd + renderD nodes, host ROCm userspace bind-mounts, `--group-add` node permissions — argv-verified on a synthetic device, see the [runbook](docs/runbook.md)) but not yet hardware-verified. WSL2's toolkit-free attach (`/dev/dxg` + the Windows driver's `/usr/lib/wsl/lib` — still no NVIDIA Container Toolkit) is likewise implemented and argv-verified on a synthetic device, hardware verification pending. Apple Metal and custom TOML probes are detected (Metal requires a macOS build — the shipped Linux binary never emits `metal`); NVIDIA remains the only backend verified end-to-end on hardware so far.
+=======
+**Status: production-verified end-to-end** on a bare-metal Fedora host (RTX 5070 Ti, driver 580 open kernel module, no NVIDIA Container Toolkit): the smoke test above plus a 14B LLM served at "100% GPU" per `ollama ps`, in an accelrun-launched container. Other backends (AMD ROCm, Apple Metal, custom TOML probes) are detected, but NVIDIA is the only one verified end-to-end so far. WSL2's toolkit-free attach (`/dev/dxg` + the Windows driver's `/usr/lib/wsl/lib` — still no NVIDIA Container Toolkit) is implemented and argv-verified on a synthetic device, hardware verification pending.
+>>>>>>> origin/main
 
 ## What it is — and what it is not
 
@@ -65,7 +73,11 @@ If that prints `PASS`, you have PTX-JIT'd vector-add running in a container laun
 | Mode | When it engages | Requirements |
 |---|---|---|
 | **direct** (default) | bare-metal host with `/dev/nvidia*` nodes, or WSL2 (`/dev/dxg` + Windows driver) | none — works on any Docker |
+<<<<<<< HEAD
 | **cdi** (`--cdi` flag) | vendor-neutral spec publication/demonstration (not a compute attach path — direct mode does that) | Docker ≥ 25 to resolve it; spec auto-installed to `/var/run/cdi` (fallback `/etc/cdi`) — may need a daemon reload |
+=======
+| **cdi** (`--cdi` flag) | fleet tooling wants vendor-neutral specs | Docker ≥ 25, spec in the daemon CDI dir |
+>>>>>>> origin/main
 | `--gpus all` (automatic last resort) | driver works but neither numbered nodes nor `/dev/dxg` are visible (restricted namespaces) | NVIDIA Container Toolkit — accelrun errors with remediation if absent |
 
 Direct mode injects, with no toolkit involved:
