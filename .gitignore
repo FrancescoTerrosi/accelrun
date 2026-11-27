@@ -3,6 +3,12 @@
 # local convenience copy of the release binary (extracted from the Docker image
 # or copied from target/release for quick `./accelrun` use)
 /accelrun
+# release binaries produced by build.sh --release (attached to the GitHub
+# release; large build artifacts, never committed)
+/accelrun-v*
+# NOTE: SHA256SUMS is deliberately NOT ignored — it is committed so each
+# release's checksum is anchored in git history (and the Zenodo DOI) as the
+# trusted record third parties verify downloaded binaries against.
 
 # --- Python (tests) ----------------------------------------------------------
 tests/__pycache__/

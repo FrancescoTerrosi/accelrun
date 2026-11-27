@@ -13,7 +13,7 @@ clean.sh — remove accelrun artifacts, inside and outside the repo
 Inventory (what the project leaves behind, and where):
 
   repo        target/, ./accelrun, ./accelrun-v* (local convenience/release
-              binaries), tests/__pycache__/                     [in this clone]
+              binaries), SHA256SUMS, tests/__pycache__/         [in this clone]
   containers  every container accelrun launched — matched by the ACCEL_*
               env contract or the accelrun image, NOT by name guessing;
               catches `-d`/`--restart` leftovers (docker drops --rm for
@@ -23,7 +23,8 @@ Inventory (what the project leaves behind, and where):
   volumes     `ollama-data` (README recipe — LLM models, re-download needed!)
               + named volumes mounted by accelrun containers;
               anonymous volumes are only reported (never auto-pruned)
-  images      accelrun:* (+ base images rust:*/debian:bookworm-slim via --all)
+  images      accelrun:* (the build-vehicle image; + base image rust:*
+              via --all)
   filesystem  /tmp/accelrun-cdi (CDI spec on every `run`; mount-hints
               sidecar in --cdi mode), CDI specs registering accel.local/gpu
               in /etc/cdi or /var/run/cdi (--cdi mode), /sys/fs/cgroup/accelrun
@@ -157,6 +158,13 @@ else
   echo "  no local binaries — ok"
 fi
 
+if [ -f "$repo_dir/SHA256SUMS" ]; then
+  try_item "remove SHA256SUMS (release checksums — regenerate via build.sh --release)" \
+    rm -f -- "$repo_dir/SHA256SUMS"
+else
+  echo "  SHA256SUMS — ok"
+fi
+
 if [ -d "$repo_dir/target" ]; then
   try_item "remove cargo build dir target/" rm -rf -- "$repo_dir/target"
   [ -d "$repo_dir/target" ] && echo "  target/ still present" || echo "  target/ gone"
@@ -279,7 +287,7 @@ else
     if $ALL; then
       echo
       echo "── docker base images (--all, shared with other projects) ──"
-      for img in rust:1.99-bookworm debian:bookworm-slim; do
+      for img in rust:1.99-bookworm; do
         docker image inspect "$img" >/dev/null 2>&1 || continue
         deps="$(docker ps -a --filter ancestor="$img" --format '{{.Names}}' | head -3 | tr '\n' ' ')"
         if [ -n "$deps" ]; then
