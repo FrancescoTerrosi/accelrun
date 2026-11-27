@@ -25,6 +25,9 @@ RUN cargo build --release
 
 # Carrier stage: just the finished binary at a stable path for `docker cp`.
 # scratch (no userspace at all) — the binary is glibc-linked and runs on the
-# host, so the image never needs a libc of its own.
+# host, so the image never needs a libc of its own. A CMD is required only so
+# `docker create` (what build.sh uses to extract the binary) has a command to
+# set; it is never actually run.
 FROM scratch
 COPY --from=builder /src/target/release/accelrun /accelrun
+CMD ["/accelrun"]
